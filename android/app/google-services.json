@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "989874980558",
+    "project_id": "siabsen-2c6b6",
+    "storage_bucket": "siabsen-2c6b6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:989874980558:android:c7bce52081aa838490f29f",
+        "android_client_info": {
+          "package_name": "com.tanjungkarang.siabsen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAuhEtYxXJ5HXIn-6sktkb-Nps9re2nmWo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
