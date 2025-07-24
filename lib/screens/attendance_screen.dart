@@ -21,6 +21,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool isLoading = true;
   Map<String, String> attendance = {};
   String? errorMsg;
+  bool attendanceExistsToday = false;
+  String? attendanceDocId;
 
   @override
   void initState() {
@@ -34,36 +36,38 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       final now = DateTime.now();
       final weekday = _weekdayToIndo(now.weekday);
       final nuptk = widget.userInfo?['nuptk'] ?? '';
-      // Cari jadwal yang cocok
+
       final scheduleQuery = await FirebaseFirestore.instance
-          .collection('schedules')
-          .where('teacher_id', isEqualTo: nuptk)
-          .get();
+        .collection('schedules')
+        .where('teacher_id', isEqualTo: nuptk)
+        .get();
+
       Map<String, dynamic>? foundSchedule;
       String? foundScheduleId;
       DateTime? nearestTime;
       Map<String, dynamic>? nearestSchedule;
+
       for (var doc in scheduleQuery.docs) {
         final data = doc.data() as Map<String, dynamic>;
         if (data['time'] != null && data['time'].toString().toLowerCase().contains(weekday.toLowerCase())) {
-          // Ekstrak jam mulai dan selesai
           final timeString = data['time'].toString();
-          final regex = RegExp(r'(\d{2}:\d{2})-(\d{2}:\d{2})');
+          final regex = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})');
           final match = regex.firstMatch(timeString);
+
           if (match != null) {
-            final start = match.group(1)!;
-            final end = match.group(2)!;
+            final start = match.group(1)! + ':' + match.group(2)!;
+            final end = match.group(3)! + ':' + match.group(4)!;
             final nowMinutes = now.hour * 60 + now.minute;
             final startParts = start.split(':').map(int.parse).toList();
             final endParts = end.split(':').map(int.parse).toList();
             final startMinutes = startParts[0] * 60 + startParts[1];
             final endMinutes = endParts[0] * 60 + endParts[1];
+
             if (nowMinutes >= startMinutes && nowMinutes <= endMinutes) {
               foundSchedule = data;
               foundScheduleId = doc.id;
               break;
             } else if (startMinutes > nowMinutes) {
-              // Cek jadwal terdekat berikutnya
               final scheduleDateTime = DateTime(now.year, now.month, now.day, startParts[0], startParts[1]);
               if (nearestTime == null || scheduleDateTime.isBefore(nearestTime)) {
                 nearestTime = scheduleDateTime;
@@ -72,18 +76,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             }
           }
         } else if (data['time'] != null) {
-          // Cek jadwal hari lain dalam minggu ini
+          // Check schedules for other days this week
           final timeString = data['time'].toString();
-          final regex = RegExp(r'([A-Za-z]+) (\d{2}:\d{2})-(\d{2}:\d{2})');
+          final regex = RegExp(r'([A-Za-z]+) (\d{2}):(\d{2})-(\d{2}):(\d{2})');
           final match = regex.firstMatch(timeString);
+
           if (match != null) {
             final dayStr = match.group(1)!;
-            final start = match.group(2)!;
+            final start = match.group(2)! + ':' + match.group(3)!;
             final startParts = start.split(':').map(int.parse).toList();
-            // Hitung selisih hari
+
             final targetWeekday = _indoToWeekday(dayStr);
             int daysDiff = (targetWeekday - now.weekday) % 7;
             if (daysDiff < 0) daysDiff += 7;
+
             final scheduleDateTime = DateTime(now.year, now.month, now.day + daysDiff, startParts[0], startParts[1]);
             if (scheduleDateTime.isAfter(now)) {
               if (nearestTime == null || scheduleDateTime.isBefore(nearestTime)) {
@@ -94,12 +100,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           }
         }
       }
+
       if (foundSchedule == null) {
         setState(() {
           isLoading = false;
           errorMsg = 'Tidak ada jadwal mengajar untuk waktu ini.';
         });
-        // Tampilkan jadwal terdekat jika ada
         if (nearestSchedule != null && nearestTime != null) {
           Future.delayed(Duration.zero, () {
             showDialog(
@@ -119,13 +125,39 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }
         return;
       }
+
       classId = foundSchedule['class_id'];
       scheduleId = foundScheduleId;
-      // Ambil data kelas
+
+      // Check if attendance already exists for today
+      final today = DateTime(now.year, now.month, now.day);
+      final tomorrow = today.add(const Duration(days: 1));
+      final attendanceQuery = await FirebaseFirestore.instance
+        .collection('attendances')
+        .where('schedule_id', isEqualTo: scheduleId)
+        .where('teacher_id', isEqualTo: nuptk)
+        .where('date', isGreaterThanOrEqualTo: today)
+        .where('date', isLessThan: tomorrow)
+        .limit(1)
+        .get();
+      if (attendanceQuery.docs.isNotEmpty) {
+        attendanceExistsToday = true;
+        attendanceDocId = attendanceQuery.docs.first.id;
+        final attData = attendanceQuery.docs.first.data() as Map<String, dynamic>;
+        final attMap = attData['attendance'] as Map?;
+        if (attMap != null) {
+          attendance = Map<String, String>.from(attMap);
+        }
+      } else {
+        attendanceExistsToday = false;
+        attendanceDocId = null;
+      }
+
       final classDoc = await FirebaseFirestore.instance.collection('classes').doc(classId).get();
       final classData = classDoc.data();
-      className = classData!['grade'].toString() + ' ' + (classData?['class'] ?? '');
+      className = classData!['grade'].toString() + ' ' + (classData?['class_name'] ?? '');
       final studentIds = List<String>.from(classData?['students'] ?? []);
+
       if (studentIds.isEmpty) {
         setState(() {
           isLoading = false;
@@ -133,11 +165,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         });
         return;
       }
-      // Ambil data siswa
+
       final studentsQuery = await FirebaseFirestore.instance
-          .collection('students')
-          .where(FieldPath.documentId, whereIn: studentIds)
-          .get();
+        .collection('students')
+        .where(FieldPath.documentId, whereIn: studentIds)
+        .get();
+
       students = studentsQuery.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return {
@@ -145,8 +178,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           'name': data['name'] ?? '',
         };
       }).toList();
-      // Inisialisasi status presensi default
-      attendance = { for (var s in students) s['id']: 'hadir' };
+
+      // If no attendance exists, initialize all as hadir
+      if (!attendanceExistsToday) {
+        attendance = { for (var s in students) s['id']: 'hadir' };
+      }
       setState(() { isLoading = false; });
     } catch (e) {
       setState(() {
@@ -179,64 +215,69 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : errorMsg != null
+        ? const Center(child: CircularProgressIndicator())
+        : errorMsg != null
           ? Center(child: Text(errorMsg!, style: const TextStyle(color: Colors.red)))
           : Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (className != null)
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text('Kelas: $className', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: ElevatedButton.icon(
-              onPressed: _setAllHadir,
-              icon: const Icon(Icons.check_circle),
-              label: const Text('Hadir Semua'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView.builder(
-              itemCount: students.length,
-              itemBuilder: (context, index) {
-                final s = students[index];
-                return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: ListTile(
-                    title: Text(s['name']),
-                    trailing: DropdownButton<String>(
-                      value: attendance[s['id']],
-                      items: const [
-                        DropdownMenuItem(value: 'hadir', child: Text('Hadir')),
-                        DropdownMenuItem(value: 'sakit', child: Text('Sakit')),
-                        DropdownMenuItem(value: 'izin', child: Text('Izin')),
-                        DropdownMenuItem(value: 'alfa', child: Text('Alfa')),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          attendance[s['id']] = value!;
-                        });
-                      },
-                    ),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (className != null)
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text('Kelas: $className', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
-                );
-              },
+                if (attendanceExistsToday)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
+                    child: Text('Presensi untuk jadwal ini sudah diisi hari ini.', style: TextStyle(color: Colors.green[700], fontWeight: FontWeight.bold)),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: ElevatedButton.icon(
+                    onPressed: _setAllHadir,
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('Hadir Semua'),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: students.length,
+                    itemBuilder: (context, index) {
+                      final s = students[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        child: ListTile(
+                          title: Text(s['name']),
+                          trailing: DropdownButton<String>(
+                            value: attendance[s['id']],
+                            items: const [
+                              DropdownMenuItem(value: 'hadir', child: Text('Hadir')),
+                              DropdownMenuItem(value: 'sakit', child: Text('Sakit')),
+                              DropdownMenuItem(value: 'izin', child: Text('Izin')),
+                              DropdownMenuItem(value: 'alfa', child: Text('Alfa')),
+                            ],
+                            onChanged: (value) {
+                              setState(() {
+                                attendance[s['id']] = value!;
+                              });
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
       floatingActionButton: isLoading || errorMsg != null
         ? null
         : FloatingActionButton.extended(
-            onPressed: _saveAttendance,
+            onPressed: attendanceExistsToday ? null : _saveAttendance,
             icon: const Icon(Icons.save),
-            label: const Text('Simpan'),
-            backgroundColor: Colors.teal,
+            label: attendanceExistsToday ? const Text('Presensi Sudah Disimpan') : const Text('Simpan'),
+            backgroundColor: attendanceExistsToday ? Colors.grey : Colors.teal,
           ),
     );
   }
@@ -252,6 +293,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         'teacher_id': userInfo['nuptk'] ?? '',
         'date': DateTime(now.year, now.month, now.day),
         'attendance': attendance,
+        'student_ids': attendance.keys.toList(),
         'created_at': FieldValue.serverTimestamp(),
       });
       if (mounted) {

@@ -63,7 +63,7 @@ class StudentDetailScreen extends StatelessWidget {
                   child: StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collection('attendances')
-                        .where('attendance.${studentId}', isGreaterThan: '')
+                        .where('student_ids', arrayContains: studentId)
                         .orderBy('date', descending: true)
                         .snapshots(),
                     builder: (context, snapshot) {
@@ -85,7 +85,7 @@ class StudentDetailScreen extends StatelessWidget {
                           return ListTile(
                             leading: const Icon(Icons.event_available),
                             title: Text('Tanggal: $dateStr'),
-                            subtitle: Text('Kelas: $classId\nStatus: $status'),
+                            subtitle: Text('Status: $status'),
                           );
                         },
                       );
