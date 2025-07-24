@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CreateClassScreen extends StatefulWidget {
-  const CreateClassScreen({Key? key}) : super(key: key);
+  final Map<String, dynamic>? classData; // For edit mode
+  const CreateClassScreen({Key? key, this.classData}) : super(key: key);
 
   @override
   State<CreateClassScreen> createState() => _CreateClassScreenState();
@@ -11,110 +12,189 @@ class CreateClassScreen extends StatefulWidget {
 class _CreateClassScreenState extends State<CreateClassScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _classNameController = TextEditingController();
-  final TextEditingController _yearController = TextEditingController();
   final TextEditingController _gradeController = TextEditingController();
+  String? _selectedYearId;
   bool _isLoading = false;
   String? _message;
 
-  Future<void> _createClass() async {
-    setState(() {
-      _isLoading = true;
-      _message = null;
-    });
-
-    final className = _classNameController.text.trim();
-    final year = _yearController.text.trim();
-    final grade = _gradeController.text.trim();
-
-    if (year == null) {
-      setState(() {
-        _isLoading = false;
-        _message = 'Year must be a number';
-      });
-      return;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.classData != null) {
+      // Edit mode - populate fields with existing data
+      _classNameController.text = widget.classData!['class_name'] ?? '';
+      _gradeController.text = widget.classData!['grade'] ?? '';
+      _selectedYearId = widget.classData!['year_id'];
     }
+  }
 
+  Future<void> _createClass() async {
+    setState(() => _isLoading = true);
     try {
-      // Query students matching class and year
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('students')
-          .where('class', isEqualTo: className)
-          .where('year', isEqualTo: year)
-          .where('grade', isEqualTo: grade)
-          .get();
-
-      final studentIds = querySnapshot.docs.map((doc) => doc.id).toList();
-
-      // Create or update the class document
-      final classDocId = '${grade}${className}-$year';
-      await FirebaseFirestore.instance.collection('classes').doc(classDocId).set({
-        'class': className,
-        'year': year,
-        'grade': grade,
-        'students': studentIds,
-      });
-
-      setState(() {
-        _isLoading = false;
-        _message = 'Class created successfully with ${studentIds.length} students!';
-      });
+      // Duplicate check: grade + class_name + year_id
+      final existing = await FirebaseFirestore.instance
+        .collection('classes')
+        .where('grade', isEqualTo: _gradeController.text.trim())
+        .where('class_name', isEqualTo: _classNameController.text.trim())
+        .where('year_id', isEqualTo: _selectedYearId)
+        .get();
+      if (existing.docs.isNotEmpty && (widget.classData == null || widget.classData!['id'] != existing.docs.first.id)) {
+        setState(() {
+          _isLoading = false;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Kelas dengan tingkat, nama, dan tahun ini sudah ada!'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+      final classData = {
+        'class_name': _classNameController.text.trim(),
+        'grade': _gradeController.text.trim(),
+        'year_id': _selectedYearId,
+        'students': widget.classData?['students'] ?? [], // Keep existing students if editing
+      };
+      
+      if (widget.classData != null && widget.classData!['id'] != null) {
+        // Edit mode
+        await FirebaseFirestore.instance
+            .collection('classes')
+            .doc(widget.classData!['id'])
+            .update(classData);
+        setState(() {
+          _isLoading = false;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Kelas berhasil diperbarui!')),
+          );
+        }
+      } else {
+        // Create mode
+        await FirebaseFirestore.instance.collection('classes').add(classData);
+        setState(() {
+          _isLoading = false;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Kelas berhasil dibuat!')),
+          );
+        }
+      }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _message = 'Failed to create class: $e';
-      });
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Class')),
-      body: Padding(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Text('Buat Kelas Baru'),
+        backgroundColor: Colors.white,
+        elevation: 1,
+      ),
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              TextFormField(
-                controller: _classNameController,
-                decoration: const InputDecoration(labelText: 'Class Name (e.g. A)'),
-                validator: (value) => value == null || value.isEmpty ? 'Enter class name' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _yearController,
-                decoration: const InputDecoration(labelText: 'Year (e.g. 2024)'),
-                keyboardType: TextInputType.number,
-                validator: (value) => value == null || value.isEmpty ? 'Enter year' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _gradeController,
-                decoration: const InputDecoration(labelText: 'Grade (e.g. 5)'),
-                validator: (value) => value == null || value.isEmpty ? 'Enter grade' : null,
-              ),
-              const SizedBox(height: 24),
-              _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : ElevatedButton(
-                      onPressed: () {
-                        if (_formKey.currentState!.validate()) {
-                          _createClass();
-                        }
-                      },
-                      child: const Text('Create Class'),
+        child: Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _gradeController,
+                    decoration: InputDecoration(
+                      labelText: 'Tingkat (contoh: 10) *',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.school_outlined),
                     ),
-              if (_message != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  _message!,
-                  style: TextStyle(
-                    color: _message!.startsWith('Class created') ? Colors.green : Colors.red,
+                    validator: (value) => value == null || value.isEmpty ? 'Masukkan tingkat' : null,
                   ),
-                ),
-              ],
-            ],
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _classNameController,
+                    decoration: InputDecoration(
+                      labelText: 'Nama Kelas (contoh: A) *',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.class_outlined),
+                    ),
+                    validator: (value) => value == null || value.isEmpty ? 'Masukkan nama kelas' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance.collection('school_years').snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final years = snapshot.data!.docs;
+                      return DropdownButtonFormField<String>(
+                        value: _selectedYearId,
+                        items: years.map((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          return DropdownMenuItem<String>(
+                            value: doc.id,
+                            child: Text(data['name'] ?? doc.id),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedYearId = value;
+                          });
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Tahun Ajaran *',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(Icons.calendar_today_outlined),
+                        ),
+                        validator: (value) => value == null ? 'Pilih tahun ajaran' : null,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : ElevatedButton.icon(
+                    onPressed: _isLoading ? null : () {
+                      if (_formKey.currentState!.validate()) {
+                        _createClass();
+                      }
+                    },
+                    icon: _isLoading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.save_outlined),
+                    label: const Text('Simpan Kelas'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      backgroundColor: Colors.teal,
+                    ),
+                  ),
+                  if (_message != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _message!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _message!.startsWith('Kelas berhasil') ? Colors.green : Colors.red,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),

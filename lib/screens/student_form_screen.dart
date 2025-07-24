@@ -14,24 +14,25 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
   late TextEditingController _classController;
-  late TextEditingController _yearController;
-  late TextEditingController _fatherNameController;
-  late TextEditingController _motherNameController;
+  String? _selectedYearId;
+  String? _selectedGender;
   late TextEditingController _parentPhoneController;
   bool _isSaving = false;
+  String? _message;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.student?['name'] ?? '');
     _classController = TextEditingController(
-      text: widget.student != null && widget.student?['grade'] != null && widget.student?['class'] != null
-        ? '${widget.student?['grade']} ${widget.student?['class']}'
+      text: widget.student != null && widget.student?['enrollments'] != null && (widget.student!['enrollments'] as List).isNotEmpty
+        ? '${(widget.student!['enrollments'] as List).first['grade']}${(widget.student!['enrollments'] as List).first['class']}'
         : '',
     );
-    _yearController = TextEditingController(text: widget.student?['year']?.toString() ?? '');
-    _fatherNameController = TextEditingController(text: widget.student?['father_name'] ?? '');
-    _motherNameController = TextEditingController(text: widget.student?['mother_name'] ?? '');
+    _selectedYearId = widget.student != null && widget.student?['enrollments'] != null && (widget.student!['enrollments'] as List).isNotEmpty
+        ? (widget.student!['enrollments'] as List).first['year_id']
+        : null;
+    _selectedGender = widget.student?['gender'];
     _parentPhoneController = TextEditingController(text: widget.student?['parent_phone'] ?? '');
   }
 
@@ -39,9 +40,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   void dispose() {
     _nameController.dispose();
     _classController.dispose();
-    _yearController.dispose();
-    _fatherNameController.dispose();
-    _motherNameController.dispose();
+    // _yearController.dispose();
     _parentPhoneController.dispose();
     super.dispose();
   }
@@ -51,103 +50,131 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
     setState(() => _isSaving = true);
     String? selectedGrade;
     String? selectedClass;
-    if (_classController.text.contains(' ')) {
-      final parts = _classController.text.split(' ');
-      selectedGrade = parts[0];
-      selectedClass = parts.sublist(1).join(' ');
+    if (_classController.text.isNotEmpty) {
+      // Parse format like "1B", "2A", "10A", etc.
+      final text = _classController.text.trim();
+      // Find the first non-digit character to separate grade and class
+      int splitIndex = 0;
+      for (int i = 0; i < text.length; i++) {
+        if (!RegExp(r'[0-9]').hasMatch(text[i])) {
+          splitIndex = i;
+          break;
+        }
+      }
+      if (splitIndex > 0) {
+        selectedGrade = text.substring(0, splitIndex);
+        selectedClass = text.substring(splitIndex);
+      }
     }
     final studentData = {
       'name': _nameController.text.trim(),
-      'grade': selectedGrade ?? '',
-      'class': selectedClass ?? '',
-      'year': _yearController.text.trim(),
-      'father_name': _fatherNameController.text.trim(),
-      'mother_name': _motherNameController.text.trim(),
+      'gender': _selectedGender,
       'parent_phone': _parentPhoneController.text.trim(),
+      'enrollments': [
+        {
+          'grade': selectedGrade ?? '',
+          'class': selectedClass ?? '',
+          'year_id': _selectedYearId,
+        }
+      ],
     };
     try {
+      // Duplicate check: name + phone
+      final existing = await FirebaseFirestore.instance
+        .collection('students')
+        .where('name', isEqualTo: _nameController.text.trim())
+        .where('parent_phone', isEqualTo: _parentPhoneController.text.trim())
+        .get();
+      if (existing.docs.isNotEmpty && (widget.student == null || widget.student!['id'] != existing.docs.first.id)) {
+        setState(() {
+          _isSaving = false;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Siswa dengan nama dan nomor HP ini sudah terdaftar!'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+      String studentId;
       if (widget.student != null && widget.student!['id'] != null) {
         // Update existing student
-        final oldClass = widget.student!['class'];
-        final oldGrade = widget.student!['grade'];
-        final oldYear = widget.student!['year'];
-        final newClass = studentData['class'];
-        final newGrade = studentData['grade'];
-        final newYear = studentData['year'];
-        final studentId = widget.student!['id'];
+        studentId = widget.student!['id'];
         await FirebaseFirestore.instance
             .collection('students')
             .doc(studentId)
             .update(studentData);
-        // If class, grade, or year changed, update class documents
-        if (oldClass != newClass || oldGrade != newGrade || oldYear != newYear) {
-          // Remove from old class
-          final oldClassQuery = await FirebaseFirestore.instance
-              .collection('classes')
-              .where('class', isEqualTo: oldClass)
-              .where('grade', isEqualTo: oldGrade)
-              .where('year', isEqualTo: oldYear)
-              .limit(1)
-              .get();
-          if (oldClassQuery.docs.isNotEmpty) {
-            final oldClassDocId = oldClassQuery.docs.first.id;
-            await FirebaseFirestore.instance
-                .collection('classes')
-                .doc(oldClassDocId)
-                .update({
-              'students': FieldValue.arrayRemove([studentId]),
-            });
-          }
-          // Add to new class
-          final newClassQuery = await FirebaseFirestore.instance
-              .collection('classes')
-              .where('class', isEqualTo: newClass)
-              .where('grade', isEqualTo: newGrade)
-              .where('year', isEqualTo: newYear)
-              .limit(1)
-              .get();
-          if (newClassQuery.docs.isNotEmpty) {
-            final newClassDocId = newClassQuery.docs.first.id;
-            await FirebaseFirestore.instance
-                .collection('classes')
-                .doc(newClassDocId)
-                .update({
-              'students': FieldValue.arrayUnion([studentId]),
-            });
-          }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Siswa berhasil diperbarui!')),
+          );
         }
       } else {
-        // Add new student
+        // Create new student
         final docRef = await FirebaseFirestore.instance
             .collection('students')
             .add(studentData);
-        // After adding, update the class document's students array
-        final className = studentData['class'];
-        final grade = studentData['grade'];
-        final year = studentData['year'];
-        // Find the class document
+        studentId = docRef.id;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Siswa berhasil ditambahkan!')),
+          );
+        }
+      }
+
+      // Handle class enrollment changes
+      if (selectedGrade != null && selectedClass != null && _selectedYearId != null) {
+        // For editing: remove from old class if class changed
+        if (widget.student != null && widget.student!['enrollments'] != null && (widget.student!['enrollments'] as List).isNotEmpty) {
+          final oldEnrollment = (widget.student!['enrollments'] as List).first;
+          final oldGrade = oldEnrollment['grade'];
+          final oldClass = oldEnrollment['class'];
+          final oldYearId = oldEnrollment['year_id'];
+          
+          // If class/grade/year changed, remove from old class
+          if (oldGrade != selectedGrade || oldClass != selectedClass || oldYearId != _selectedYearId) {
+            final oldClassQuery = await FirebaseFirestore.instance
+                .collection('classes')
+                .where('grade', isEqualTo: oldGrade)
+                .where('class_name', isEqualTo: oldClass)
+                .where('year_id', isEqualTo: oldYearId)
+                .limit(1)
+                .get();
+
+            if (oldClassQuery.docs.isNotEmpty) {
+              final oldClassDoc = oldClassQuery.docs.first;
+              await oldClassDoc.reference.update({
+                'students': FieldValue.arrayRemove([studentId])
+              });
+            }
+          }
+        }
+
+        // Add to new class
         final classQuery = await FirebaseFirestore.instance
             .collection('classes')
-            .where('class', isEqualTo: className)
-            .where('grade', isEqualTo: grade)
-            .where('year', isEqualTo: year)
+            .where('grade', isEqualTo: selectedGrade)
+            .where('class_name', isEqualTo: selectedClass)
+            .where('year_id', isEqualTo: _selectedYearId)
             .limit(1)
             .get();
+
         if (classQuery.docs.isNotEmpty) {
-          final classDocId = classQuery.docs.first.id;
-          await FirebaseFirestore.instance
-              .collection('classes')
-              .doc(classDocId)
-              .update({
-            'students': FieldValue.arrayUnion([docRef.id]),
+          final classDoc = classQuery.docs.first;
+          await classDoc.reference.update({
+            'students': FieldValue.arrayUnion([studentId])
           });
         }
       }
+
       Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal menyimpan siswa: $e')),
-      );
+      setState(() => _isSaving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal: $e'), backgroundColor: Colors.red),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -157,78 +184,158 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   Widget build(BuildContext context) {
     final isEdit = widget.student != null;
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: Text(isEdit ? 'Edit Siswa' : 'Tambah Siswa'),
+        backgroundColor: Colors.white,
+        elevation: 1,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Nama'),
-                validator: (value) => value!.isEmpty ? 'Masukkan nama' : null,
-              ),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('classes').snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const CircularProgressIndicator();
-                  }
-                  final classes = snapshot.data!.docs;
-                  final classOptions = classes.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final label = '${data['grade']} ${data['class']}';
-                    return DropdownMenuItem<String>(
-                      value: label,
-                      child: Text(label),
-                    );
-                  }).toList();
-                  return DropdownButtonFormField<String>(
-                    value: _classController.text.isNotEmpty ? _classController.text : null,
-                    items: classOptions,
+        child: Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Nama Lengkap Siswa *',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.person_outline),
+                    ),
+                    validator: (value) => value!.isEmpty ? 'Masukkan nama' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: _selectedGender,
+                    items: const [
+                      DropdownMenuItem(value: 'Laki-laki', child: Text('Laki-laki')),
+                      DropdownMenuItem(value: 'Perempuan', child: Text('Perempuan')),
+                    ],
                     onChanged: (value) {
                       setState(() {
-                        _classController.text = value ?? '';
+                        _selectedGender = value;
                       });
                     },
-                    decoration: const InputDecoration(labelText: 'Kelas'),
-                    validator: (value) => value == null || value.isEmpty ? 'Pilih kelas' : null,
-                  );
-                },
-              ),
-              TextFormField(
-                controller: _yearController,
-                decoration: const InputDecoration(labelText: 'Tahun'),
-                keyboardType: TextInputType.number,
-                validator: (value) => value!.isEmpty ? 'Masukkan tahun' : null,
-              ),
-              TextFormField(
-                controller: _fatherNameController,
-                decoration: const InputDecoration(labelText: "Nama Ayah"),
-                validator: (value) => value!.isEmpty ? "Masukkan nama ayah" : null,
-              ),
-              TextFormField(
-                controller: _motherNameController,
-                decoration: const InputDecoration(labelText: "Nama Ibu"),
-                validator: (value) => value!.isEmpty ? "Masukkan nama ibu" : null,
-              ),
-              TextFormField(
-                controller: _parentPhoneController,
-                decoration: const InputDecoration(labelText: 'No. HP Orang Tua'),
-                validator: (value) => value!.isEmpty ? 'Masukkan no. HP orang tua' : null,
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 20),
-              _isSaving
-                  ? const Center(child: CircularProgressIndicator())
-                  : ElevatedButton(
-                      onPressed: _saveStudent,
-                      child: Text(isEdit ? 'Perbarui' : 'Tambah'),
+                    decoration: InputDecoration(
+                      labelText: 'Jenis Kelamin *',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.wc),
                     ),
-            ],
+                    validator: (value) => value == null || value.isEmpty ? 'Pilih jenis kelamin' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance.collection('classes').snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final classes = snapshot.data!.docs;
+                      final classOptions = classes.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final label = '${data['grade']}${data['class_name']}';
+                        return DropdownMenuItem<String>(
+                          value: label,
+                          child: Text(label),
+                        );
+                      }).toList();
+                      return DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        value: _classController.text.isNotEmpty ? _classController.text : null,
+                        items: classOptions,
+                        onChanged: (value) {
+                          setState(() {
+                            _classController.text = value ?? '';
+                          });
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Kelas *',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(Icons.class_outlined),
+                        ),
+                        validator: (value) => value == null || value.isEmpty ? 'Pilih kelas' : null,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance.collection('school_years').snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final years = snapshot.data!.docs;
+                      return DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        value: _selectedYearId,
+                        items: years.map((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          return DropdownMenuItem<String>(
+                            value: doc.id,
+                            child: Text(data['name'] ?? doc.id),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedYearId = value;
+                          });
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Tahun Ajaran *',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(Icons.calendar_today_outlined),
+                        ),
+                        validator: (value) => value == null ? 'Pilih tahun ajaran' : null,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _parentPhoneController,
+                    decoration: InputDecoration(
+                      labelText: 'No. HP Orang Tua *',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.phone_outlined),
+                    ),
+                    keyboardType: TextInputType.phone,
+                    validator: (value) => value!.isEmpty ? 'Masukkan no. HP' : null,
+                  ),
+                  const SizedBox(height: 24),
+                  _isSaving
+                      ? const Center(child: CircularProgressIndicator())
+                      : ElevatedButton.icon(
+                    onPressed: _isSaving ? null : _saveStudent,
+                    icon: _isSaving
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.save_outlined),
+                    label: Text(isEdit ? 'Perbarui Siswa' : 'Simpan Siswa'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      backgroundColor: Colors.teal,
+                    ),
+                  ),
+                  if (_message != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _message!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _message!.startsWith('Gagal') ? Colors.red : Colors.green,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
