@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'admin_students_screen.dart';
+import '../services/local_storage_service.dart';
+import '../services/offline_sync_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -36,28 +38,28 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         final teacher = query.docs.first.data();
         if (teacher['password'] == password) {
+          final userInfo = <String, String>{
+            'name': (teacher['name'] ?? '').toString(),
+            'nuptk': (teacher['nuptk'] ?? '').toString(),
+            'role': (teacher['role'] ?? '').toString(),
+          };
+          
+          // Save user info locally
+          await LocalStorageService.saveUserInfo(userInfo);
+          
+          // Sync teacher data in background
+          OfflineSyncService.syncTeacherData(teacher['nuptk']?.toString() ?? '');
+          
           // Redirect based on role
-          if (teacher['role'] == 'admin') {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => AdminStudentsScreen(userInfo: {
-                'name': teacher['name'] ?? '',
-                'nuptk': teacher['nuptk'] ?? '',
-                'role': teacher['role'] ?? '',
-              }, role: 'admin')),
-            );
-          } else {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => AdminStudentsScreen(userInfo: {
-                  'name': teacher['name'] ?? '',
-                  'nuptk': teacher['nuptk'] ?? '',
-                  'role': teacher['role'] ?? '',
-                }, role: 'guru'),
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AdminStudentsScreen(
+                userInfo: userInfo,
+                role: teacher['role']?.toString() ?? 'guru',
               ),
-            );
-          }
+            ),
+          );
         } else {
           setState(() {
             _errorMessage = 'Kata sandi salah.';

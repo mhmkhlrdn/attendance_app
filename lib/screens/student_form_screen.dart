@@ -70,6 +70,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       'name': _nameController.text.trim(),
       'gender': _selectedGender,
       'parent_phone': _parentPhoneController.text.trim(),
+      'status': 'active',
       'enrollments': [
         {
           'grade': selectedGrade ?? '',

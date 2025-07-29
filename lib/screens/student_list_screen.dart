@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'student_detail_screen.dart';
+import '../services/student_helper_service.dart';
 
 class StudentListScreen extends StatefulWidget {
   final String role;
@@ -59,20 +60,7 @@ class _StudentListScreenState extends State<StudentListScreen> {
   }
 
   String _getClassDisplay(Map<String, dynamic> studentData) {
-    final enrollments = studentData['enrollments'] as List?;
-    if (enrollments == null || enrollments.isEmpty) {
-      return 'Kelas: Belum terdaftar';
-    }
-    
-    final enrollment = enrollments.first as Map<String, dynamic>;
-    final grade = enrollment['grade'] ?? '';
-    final className = enrollment['class'] ?? '';
-    
-    if (grade.isEmpty && className.isEmpty) {
-      return 'Kelas: Belum terdaftar';
-    }
-    
-    return 'Kelas: $grade$className';
+    return StudentHelperService.getCurrentClassDisplay(studentData);
   }
 
   @override

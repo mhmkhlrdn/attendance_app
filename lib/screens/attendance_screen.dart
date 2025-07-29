@@ -1,8 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-
+import 'package:intl/intl.dart';
 import 'login_screen.dart';
+import '../services/local_storage_service.dart';
+import '../services/offline_sync_service.dart';
+import '../services/connectivity_service.dart';
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({Key? key, this.userInfo, this.showBackButton = false}) : super(key: key);
@@ -286,25 +289,54 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (classId == null || scheduleId == null) return;
     final now = DateTime.now();
     final userInfo = widget.userInfo ?? {};
+    final connectivityService = ConnectivityService();
+    
+    final attendanceData = {
+      'class_id': classId,
+      'schedule_id': scheduleId,
+      'teacher_id': userInfo['nuptk'] ?? '',
+      'date': DateTime(now.year, now.month, now.day).toIso8601String(),
+      'attendance': attendance,
+      'student_ids': attendance.keys.toList(),
+      'local_timestamp': DateTime.now().toIso8601String(),
+    };
+
     try {
-      await FirebaseFirestore.instance.collection('attendances').add({
-        'class_id': classId,
-        'schedule_id': scheduleId,
-        'teacher_id': userInfo['nuptk'] ?? '',
-        'date': DateTime(now.year, now.month, now.day),
-        'attendance': attendance,
-        'student_ids': attendance.keys.toList(),
-        'created_at': FieldValue.serverTimestamp(),
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Presensi berhasil disimpan!')),
-        );
+      if (connectivityService.isConnected) {
+        // Online: Save directly to Firestore
+        await FirebaseFirestore.instance.collection('attendances').add({
+          ...attendanceData,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Presensi berhasil disimpan!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        // Offline: Save to local storage for later sync
+        await LocalStorageService.savePendingAttendance(attendanceData);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Presensi disimpan offline. Akan disinkronkan saat online.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal menyimpan presensi: $e')),
+          SnackBar(
+            content: Text('Gagal menyimpan presensi: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }

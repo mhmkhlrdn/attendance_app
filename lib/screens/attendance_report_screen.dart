@@ -4,9 +4,17 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:share_plus/share_plus.dart';
+import 'advanced_report_screen.dart';
 
 class AttendanceReportScreen extends StatefulWidget {
-  const AttendanceReportScreen({Key? key}) : super(key: key);
+  final Map<String, String> userInfo;
+  final String role;
+
+  const AttendanceReportScreen({
+    Key? key,
+    required this.userInfo,
+    required this.role,
+  }) : super(key: key);
 
   @override
   State<AttendanceReportScreen> createState() => _AttendanceReportScreenState();
@@ -88,6 +96,23 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         title: const Text('Laporan Presensi'),
         backgroundColor: Colors.white,
         elevation: 1,
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => AdvancedReportScreen(
+                    userInfo: widget.userInfo,
+                    role: widget.role,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.analytics, color: Colors.white),
+            label: const Text('Laporan Lanjutan', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),

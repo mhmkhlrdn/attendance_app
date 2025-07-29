@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import '../services/student_helper_service.dart';
 
 class ClassStudentsScreen extends StatelessWidget {
   final String className;
@@ -36,14 +37,37 @@ class ClassStudentsScreen extends StatelessWidget {
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(child: Text('Tidak ada siswa ditemukan.'));
           }
-          final students = snapshot.data!.docs;
+          // Filter students to only show those whose current enrollment matches this class
+          final allStudents = snapshot.data!.docs;
+          final currentStudents = <QueryDocumentSnapshot>[];
+          
+          for (var studentDoc in allStudents) {
+            final studentData = studentDoc.data() as Map<String, dynamic>;
+            final currentEnrollment = StudentHelperService.getCurrentEnrollment(studentData);
+            
+            if (currentEnrollment != null) {
+              final currentGrade = currentEnrollment['grade']?.toString() ?? '';
+              final currentClass = currentEnrollment['class']?.toString() ?? '';
+              final currentYear = currentEnrollment['year_id']?.toString() ?? '';
+              
+              // Check if this student's current enrollment matches this class
+              if (currentGrade == grade && currentClass == className && currentYear == year) {
+                currentStudents.add(studentDoc);
+              }
+            }
+          }
+          
+          if (currentStudents.isEmpty) {
+            return const Center(child: Text('Tidak ada siswa aktif di kelas ini.'));
+          }
+          
           return ListView.builder(
-            itemCount: students.length,
+            itemCount: currentStudents.length,
             itemBuilder: (context, index) {
-              final data = students[index].data() as Map<String, dynamic>;
+              final data = currentStudents[index].data() as Map<String, dynamic>;
               return ListTile(
                 title: Text(data['name'] ?? ''),
-                subtitle: Text('NISN: ${data['nisn'] ?? ''}'),
+                subtitle: Text('Gender: ${data['gender'] ?? '-'} | Phone: ${data['parent_phone'] ?? '-'}'),
               );
             },
           );

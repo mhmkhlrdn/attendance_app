@@ -11,6 +11,12 @@ import 'create_class_screen.dart';
 import 'teacher_list_screen.dart';
 import 'attendance_history_screen.dart';
 import 'attendance_report_screen.dart';
+import 'promotion_screen.dart';
+import '../services/local_storage_service.dart';
+import '../services/connectivity_service.dart';
+import '../services/offline_sync_service.dart';
+import 'sync_status_screen.dart';
+
 class AdminStudentsScreen extends StatefulWidget {
   final Map<String, String> userInfo;
   final String role;
@@ -24,6 +30,8 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   int _selectedIndex = 0;
   bool _drawerOpen = false;
+  bool _isOnline = true;
+  bool _hasPendingSync = false;
 
   List<Widget> _getScreens() {
     return [
@@ -47,8 +55,15 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
     );
   }
 
-  void _logout() {
-    Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+  void _logout() async {
+    // Clear local storage
+    await LocalStorageService.clearUserData();
+    
+    // Navigate to login screen
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   void _onDrawerChanged(bool isOpen) {
@@ -58,11 +73,74 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _initializeConnectivity();
+    _checkPendingSync();
+  }
+
+  void _initializeConnectivity() {
+    final connectivityService = ConnectivityService();
+    connectivityService.connectionStatus.listen((isOnline) {
+      setState(() {
+        _isOnline = isOnline;
+      });
+      
+      // Sync pending data when connection is restored
+      if (isOnline) {
+        OfflineSyncService.syncPendingAttendance();
+      }
+    });
+  }
+
+  void _checkPendingSync() async {
+    final pendingAttendance = await LocalStorageService.getPendingAttendance();
+    setState(() {
+      _hasPendingSync = pendingAttendance.isNotEmpty;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
         Scaffold(
           key: _scaffoldKey,
+          appBar: AppBar(
+            title: Text('Dashboard ${widget.role == 'admin' ? 'Admin' : 'Guru'}'),
+            backgroundColor: Colors.teal,
+            foregroundColor: Colors.white,
+            actions: [
+              // Sync status indicator
+              Container(
+                margin: const EdgeInsets.only(right: 16),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _isOnline ? Icons.wifi : Icons.wifi_off,
+                      color: _isOnline ? Colors.green : Colors.red,
+                      size: 20,
+                    ),
+                    if (_hasPendingSync && !_isOnline)
+                      Container(
+                        margin: const EdgeInsets.only(left: 4),
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.orange,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.sync,
+                          color: Colors.white,
+                          size: 12,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           drawer: Drawer(
             child: ListView(
               padding: EdgeInsets.zero,
@@ -86,6 +164,20 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                 ),
                 if (widget.role == 'admin')
                   ListTile(
+                    leading: const Icon(Icons.upgrade, color: Colors.green),
+                    title: const Text('Promosi Siswa'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const PromotionScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                if (widget.role == 'admin')
+                  ListTile(
                     leading: const Icon(Icons.bar_chart, color: Colors.deepPurple),
                     title: const Text('Laporan'),
                     onTap: () {
@@ -93,7 +185,10 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => AttendanceReportScreen(),
+                          builder: (context) => AttendanceReportScreen(
+                        userInfo: widget.userInfo,
+                        role: widget.role,
+                      ),
                         ),
                       );
                     },
@@ -110,6 +205,19 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                           userInfo: widget.userInfo,
                           role: widget.role,
                         ),
+                      ),
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.sync, color: Colors.blue),
+                  title: const Text('Status Sinkronisasi'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SyncStatusScreen(),
                       ),
                     );
                   },
