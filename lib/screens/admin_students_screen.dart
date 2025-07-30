@@ -82,15 +82,34 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
   void _initializeConnectivity() {
     final connectivityService = ConnectivityService();
     connectivityService.connectionStatus.listen((isOnline) {
+      if (mounted) {
+        setState(() {
+          _isOnline = isOnline;
+        });
+        
+        // Sync pending data when connection is restored
+        if (isOnline) {
+          OfflineSyncService.syncPendingAttendance();
+        }
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Refresh connectivity status when screen becomes active
+    _refreshConnectivityStatus();
+  }
+
+  Future<void> _refreshConnectivityStatus() async {
+    final connectivityService = ConnectivityService();
+    final isOnline = await connectivityService.checkConnectivity();
+    if (mounted) {
       setState(() {
         _isOnline = isOnline;
       });
-      
-      // Sync pending data when connection is restored
-      if (isOnline) {
-        OfflineSyncService.syncPendingAttendance();
-      }
-    });
+    }
   }
 
   void _checkPendingSync() async {

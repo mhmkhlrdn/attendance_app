@@ -22,13 +22,32 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
     _initializeConnectivity();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Refresh connectivity status when screen becomes active
+    _refreshConnectivityStatus();
+  }
+
   void _initializeConnectivity() {
     final connectivityService = ConnectivityService();
     connectivityService.connectionStatus.listen((isOnline) {
+      if (mounted) {
+        setState(() {
+          _isOnline = isOnline;
+        });
+      }
+    });
+  }
+
+  Future<void> _refreshConnectivityStatus() async {
+    final connectivityService = ConnectivityService();
+    final isOnline = await connectivityService.checkConnectivity();
+    if (mounted) {
       setState(() {
         _isOnline = isOnline;
       });
-    });
+    }
   }
 
   Future<void> _loadPendingData() async {

@@ -22,7 +22,7 @@ class AdvancedReportScreen extends StatefulWidget {
 class _AdvancedReportScreenState extends State<AdvancedReportScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  DateTime _startDate = DateTime.now().subtract(const Duration(days: 30));
+  DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1); // Start of current month
   DateTime _endDate = DateTime.now();
   String? _selectedClassId;
   String? _selectedYearId;
@@ -67,12 +67,32 @@ class _AdvancedReportScreenState extends State<AdvancedReportScreen>
   }
 
   Future<void> _loadAttendanceTrends() async {
+    print('Loading attendance trends for dates: ${_startDate} to ${_endDate}');
+    print('Selected class: $_selectedClassId');
+    print('Teacher ID: ${widget.role == 'guru' ? widget.userInfo['nuptk'] : null}');
+    
+    // First, let's test with a simple query to see if there's any data
+    try {
+      final testSnapshot = await FirebaseFirestore.instance
+          .collection('attendances')
+          .limit(5)
+          .get();
+      print('Test query found ${testSnapshot.docs.length} records');
+      if (testSnapshot.docs.isNotEmpty) {
+        print('Test record data: ${testSnapshot.docs.first.data()}');
+      }
+    } catch (e) {
+      print('Test query error: $e');
+    }
+    
     final result = await AnalyticsService.getAttendanceTrends(
       startDate: _startDate,
       endDate: _endDate,
       classId: _selectedClassId,
       teacherId: widget.role == 'guru' ? widget.userInfo['nuptk'] : null,
     );
+
+    print('Analytics result: $result');
 
     setState(() {
       _currentData = Map<String, dynamic>.from(result);

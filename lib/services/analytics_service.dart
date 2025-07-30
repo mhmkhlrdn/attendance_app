@@ -12,9 +12,15 @@ class AnalyticsService {
     String? teacherId,
   }) async {
     try {
+      // Convert dates to Timestamp objects for querying since we store dates as Timestamps
+      final startTimestamp = Timestamp.fromDate(DateTime(startDate.year, startDate.month, startDate.day));
+      final endTimestamp = Timestamp.fromDate(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59));
+      
+      print('Querying with date range: $startTimestamp to $endTimestamp');
+      
       Query query = _firestore.collection('attendances')
-          .where('date', isGreaterThanOrEqualTo: startDate)
-          .where('date', isLessThanOrEqualTo: endDate);
+          .where('date', isGreaterThanOrEqualTo: startTimestamp)
+          .where('date', isLessThanOrEqualTo: endTimestamp);
 
       if (classId != null) {
         query = query.where('class_id', isEqualTo: classId);
@@ -25,12 +31,38 @@ class AnalyticsService {
 
       final snapshot = await query.get();
       final attendances = snapshot.docs;
+      
+      print('Found ${attendances.length} attendance records');
+      if (attendances.isNotEmpty) {
+        print('Sample attendance data: ${attendances.first.data()}');
+      } else {
+        // Try to get all attendance records to see if there's any data
+        final allSnapshot = await _firestore.collection('attendances').limit(5).get();
+        print('Total attendance records in collection: ${allSnapshot.docs.length}');
+        if (allSnapshot.docs.isNotEmpty) {
+          print('Sample of all attendance data: ${allSnapshot.docs.first.data()}');
+        }
+      }
 
       // Group by date
       Map<String, Map<String, int>> dailyStats = {};
       for (var doc in attendances) {
         final data = doc.data() as Map<String, dynamic>;
-        final date = (data['date'] as Timestamp).toDate();
+        
+        // Handle both Timestamp and String date formats
+        DateTime date;
+        if (data['date'] is Timestamp) {
+          date = (data['date'] as Timestamp).toDate();
+        } else if (data['date'] is String) {
+          date = DateTime.parse(data['date'] as String);
+        } else if (data['created_at'] is Timestamp) {
+          // Fallback to created_at if date field is not available
+          date = (data['created_at'] as Timestamp).toDate();
+        } else {
+          print('Skipping record with invalid date format: ${data['date']}');
+          continue; // Skip invalid date format
+        }
+        
         final dateStr = DateFormat('yyyy-MM-dd').format(date);
         final attendance = Map<String, dynamic>.from(data['attendance'] ?? {});
 
@@ -101,10 +133,12 @@ class AnalyticsService {
           .where('student_ids', arrayContains: studentId);
 
       if (startDate != null) {
-        query = query.where('date', isGreaterThanOrEqualTo: startDate);
+        final startTimestamp = Timestamp.fromDate(DateTime(startDate.year, startDate.month, startDate.day));
+        query = query.where('date', isGreaterThanOrEqualTo: startTimestamp);
       }
       if (endDate != null) {
-        query = query.where('date', isLessThanOrEqualTo: endDate);
+        final endTimestamp = Timestamp.fromDate(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59));
+        query = query.where('date', isLessThanOrEqualTo: endTimestamp);
       }
 
       final snapshot = await query.get();
@@ -123,7 +157,16 @@ class AnalyticsService {
       for (var doc in attendances) {
         final data = doc.data() as Map<String, dynamic>;
         final attendance = Map<String, dynamic>.from(data['attendance'] ?? {});
-        final date = (data['date'] as Timestamp).toDate();
+        
+        // Handle both Timestamp and String date formats
+        DateTime date;
+        if (data['date'] is Timestamp) {
+          date = (data['date'] as Timestamp).toDate();
+        } else if (data['date'] is String) {
+          date = DateTime.parse(data['date'] as String);
+        } else {
+          continue; // Skip invalid date format
+        }
         
         if (attendance.containsKey(studentId)) {
           final status = attendance[studentId].toString().toLowerCase();
@@ -194,10 +237,12 @@ class AnalyticsService {
             .where('class_id', isEqualTo: classId);
 
         if (startDate != null) {
-          attendanceQuery = attendanceQuery.where('date', isGreaterThanOrEqualTo: startDate);
+          final startTimestamp = Timestamp.fromDate(DateTime(startDate.year, startDate.month, startDate.day));
+          attendanceQuery = attendanceQuery.where('date', isGreaterThanOrEqualTo: startTimestamp);
         }
         if (endDate != null) {
-          attendanceQuery = attendanceQuery.where('date', isLessThanOrEqualTo: endDate);
+          final endTimestamp = Timestamp.fromDate(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59));
+          attendanceQuery = attendanceQuery.where('date', isLessThanOrEqualTo: endTimestamp);
         }
 
         final attendanceSnapshot = await attendanceQuery.get();
@@ -279,10 +324,12 @@ class AnalyticsService {
           .where('teacher_id', isEqualTo: teacherId);
 
       if (startDate != null) {
-        query = query.where('date', isGreaterThanOrEqualTo: startDate);
+        final startTimestamp = Timestamp.fromDate(DateTime(startDate.year, startDate.month, startDate.day));
+        query = query.where('date', isGreaterThanOrEqualTo: startTimestamp);
       }
       if (endDate != null) {
-        query = query.where('date', isLessThanOrEqualTo: endDate);
+        final endTimestamp = Timestamp.fromDate(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59));
+        query = query.where('date', isLessThanOrEqualTo: endTimestamp);
       }
 
       final snapshot = await query.get();
