@@ -15,6 +15,7 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
   String? _selectedClassId;
   String? _selectedTeacherId;
   final TextEditingController _subjectController = TextEditingController();
+  String _scheduleType = 'subject_specific'; // 'daily_morning' or 'subject_specific'
   String? _selectedDay;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
@@ -29,27 +30,45 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
       _selectedClassId = widget.schedule!['class_id'];
       _selectedTeacherId = widget.schedule!['teacher_id'];
       _subjectController.text = widget.schedule!['subject'] ?? '';
+      _scheduleType = widget.schedule!['schedule_type'] ?? 'subject_specific';
+      _selectedDay = widget.schedule!['day_of_week'];
       
-      // Parse time string to extract day and times
+      // Parse time string to extract times
       final timeString = widget.schedule!['time'] ?? '';
       if (timeString.isNotEmpty) {
-        final parts = timeString.split(' ');
-        if (parts.length >= 2) {
-          _selectedDay = parts[0];
-          final timeRange = parts[1];
-          final timeParts = timeRange.split('-');
+        if (_scheduleType == 'daily_morning') {
+          // For daily morning, time is just "06:30"
+          final timeParts = timeString.split(':');
           if (timeParts.length == 2) {
-            final startParts = timeParts[0].split(':');
-            final endParts = timeParts[1].split(':');
-            if (startParts.length == 2 && endParts.length == 2) {
-              _startTime = TimeOfDay(
-                hour: int.parse(startParts[0]),
-                minute: int.parse(startParts[1]),
-              );
-              _endTime = TimeOfDay(
-                hour: int.parse(endParts[0]),
-                minute: int.parse(endParts[1]),
-              );
+            _startTime = TimeOfDay(
+              hour: int.parse(timeParts[0]),
+              minute: int.parse(timeParts[1]),
+            );
+            _endTime = TimeOfDay(
+              hour: int.parse(timeParts[0]),
+              minute: int.parse(timeParts[1]) + 30, // 30 minutes duration
+            );
+          }
+        } else {
+          // For subject-specific, parse day and time range
+          final parts = timeString.split(' ');
+          if (parts.length >= 2) {
+            _selectedDay = parts[0];
+            final timeRange = parts[1];
+            final timeParts = timeRange.split('-');
+            if (timeParts.length == 2) {
+              final startParts = timeParts[0].split(':');
+              final endParts = timeParts[1].split(':');
+              if (startParts.length == 2 && endParts.length == 2) {
+                _startTime = TimeOfDay(
+                  hour: int.parse(startParts[0]),
+                  minute: int.parse(startParts[1]),
+                );
+                _endTime = TimeOfDay(
+                  hour: int.parse(endParts[0]),
+                  minute: int.parse(endParts[1]),
+                );
+              }
             }
           }
         }
@@ -76,216 +95,414 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: Text(widget.schedule != null ? 'Edit Jadwal' : 'Buat Jadwal'),
-        backgroundColor: Colors.white,
-        elevation: 1,
+        title: Text(widget.schedule != null ? 'Edit Jadwal' : 'Buat Jadwal Baru'),
+        backgroundColor: Colors.teal,
+        foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('classes').snapshots(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final classes = snapshot.data!.docs;
-                      return DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        value: _selectedClassId,
-                        items: classes.map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          final label = 'Kelas ${data['grade']}${data['class_name']} (${data['year_id']})';
-                          return DropdownMenuItem<String>(
-                            value: doc.id,
-                            child: Text(label),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedClassId = value;
-                          });
-                        },
-                        decoration: InputDecoration(
-                          labelText: 'Kelas',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          prefixIcon: const Icon(Icons.class_outlined),
-                        ),
-                        validator: (value) => value == null ? 'Pilih kelas' : null,
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('teachers').snapshots(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final teachers = snapshot.data!.docs;
-                      return DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        value: _selectedTeacherId,
-                        items: teachers.map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          final label = '${data['name']} (${data['nuptk']})';
-                          return DropdownMenuItem<String>(
-                            value: doc['nuptk'],
-                            child: Text(label),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedTeacherId = value;
-                          });
-                        },
-                        decoration: InputDecoration(
-                          labelText: 'Guru',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          prefixIcon: const Icon(Icons.person_outline),
-                        ),
-                        validator: (value) => value == null ? 'Pilih guru' : null,
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _subjectController,
-                    decoration: InputDecoration(
-                      labelText: 'Mata Pelajaran',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      prefixIcon: const Icon(Icons.book_outlined),
-                    ),
-                    validator: (value) => value == null || value.isEmpty ? 'Masukkan mata pelajaran' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    value: _selectedDay,
-                    items: const [
-                      DropdownMenuItem(value: 'Senin', child: Text('Senin')),
-                      DropdownMenuItem(value: 'Selasa', child: Text('Selasa')),
-                      DropdownMenuItem(value: 'Rabu', child: Text('Rabu')),
-                      DropdownMenuItem(value: 'Kamis', child: Text('Kamis')),
-                      DropdownMenuItem(value: 'Jumat', child: Text('Jumat')),
-                      DropdownMenuItem(value: 'Sabtu', child: Text('Sabtu')),
-                      DropdownMenuItem(value: 'Minggu', child: Text('Minggu')),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedDay = value;
-                      });
-                    },
-                    decoration: InputDecoration(
-                      labelText: 'Hari',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      prefixIcon: const Icon(Icons.calendar_today_outlined),
-                    ),
-                    validator: (value) => value == null ? 'Pilih hari' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Schedule Type Selection
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => _pickTime(isStart: true),
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                              labelText: 'Jam Mulai',
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: Text(_startTime != null ? _startTime!.format(context) : 'Pilih...'),
-                          ),
+                      const Text(
+                        'Jenis Jadwal',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => _pickTime(isStart: false),
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                              labelText: 'Jam Selesai',
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: Text(_endTime != null ? _endTime!.format(context) : 'Pilih...'),
-                          ),
-                        ),
+                      const SizedBox(height: 12),
+                      RadioListTile<String>(
+                        title: const Text('Presensi Pagi Harian'),
+                        subtitle: const Text('Presensi setiap pagi pukul 06:30'),
+                        value: 'daily_morning',
+                        groupValue: _scheduleType,
+                        onChanged: (value) {
+                          setState(() {
+                            _scheduleType = value!;
+                            // Set default time for daily morning
+                            _startTime = const TimeOfDay(hour: 6, minute: 30);
+                            _endTime = const TimeOfDay(hour: 7, minute: 0);
+                            _selectedDay = null;
+                            // Set the subject text for daily morning
+                            _subjectController.text = 'Presensi Pagi Harian';
+                          });
+                        },
+                      ),
+                      RadioListTile<String>(
+                        title: const Text('Mata Pelajaran Spesifik'),
+                        subtitle: const Text('Jadwal untuk mata pelajaran tertentu (seperti Olahraga)'),
+                        value: 'subject_specific',
+                        groupValue: _scheduleType,
+                        onChanged: (value) {
+                          setState(() {
+                            _scheduleType = value!;
+                            _startTime = null;
+                            _endTime = null;
+                            _selectedDay = null;
+                            // Clear the subject text for subject-specific
+                            _subjectController.clear();
+                          });
+                        },
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
-                  _isSaving
-                      ? const Center(child: CircularProgressIndicator())
-                      : ElevatedButton.icon(
-                    onPressed: () async {
-                      if (_formKey.currentState!.validate() && _selectedDay != null && _startTime != null && _endTime != null) {
-                        setState(() => _isSaving = true);
-                        try {
-                          final timeString = '$_selectedDay ${_startTime!.format(context)}-${_endTime!.format(context)}';
-                          final scheduleData = {
-                            'teacher_id': _selectedTeacherId,
-                            'subject': _subjectController.text.trim(),
-                            'class_id': _selectedClassId,
-                            'time': timeString,
-                          };
-                          
-                          if (widget.schedule != null && widget.schedule!['id'] != null) {
-                            // Edit mode
-                            await FirebaseFirestore.instance
-                                .collection('schedules')
-                                .doc(widget.schedule!['id'])
-                                .update(scheduleData);
-                            setState(() {
-                              _isSaving = false;
-                              _message = 'Jadwal berhasil diperbarui!';
-                            });
-                          } else {
-                            // Create mode
-                            await FirebaseFirestore.instance.collection('schedules').add(scheduleData);
-                            setState(() {
-                              _isSaving = false;
-                              _message = 'Jadwal berhasil dibuat!';
-                            });
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Class Selection
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Pilih Kelas',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance.collection('classes').snapshots(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Center(child: CircularProgressIndicator());
                           }
-                        } catch (e) {
-                          setState(() {
-                            _isSaving = false;
-                            _message = 'Gagal: $e';
-                          });
-                        }
-                      }
-                    },
-                    icon: const Icon(Icons.save_outlined),
-                    label: Text(widget.schedule != null ? 'Perbarui Jadwal' : 'Buat Jadwal'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                            return const Text('Tidak ada kelas tersedia.');
+                          }
+                          final classes = snapshot.data!.docs;
+                          return DropdownButtonFormField<String>(
+                            value: _selectedClassId,
+                            decoration: const InputDecoration(
+                              labelText: 'Kelas',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: classes.map((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              return DropdownMenuItem(
+                                value: doc.id,
+                                child: Text('${data['grade']} ${data['class_name']}'),
+                              );
+                            }).toList(),
+                            onChanged: (value) => setState(() => _selectedClassId = value),
+                            validator: (value) => value == null ? 'Pilih kelas' : null,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Teacher Selection
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Pilih Guru',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance.collection('teachers').snapshots(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                            return const Text('Tidak ada guru tersedia.');
+                          }
+                          final teachers = snapshot.data!.docs;
+                          return DropdownButtonFormField<String>(
+                            value: _selectedTeacherId,
+                            decoration: const InputDecoration(
+                              labelText: 'Guru',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: teachers.map((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              return DropdownMenuItem(
+                                value: doc.id,
+                                child: Text('${data['name']} (${data['nuptk']})'),
+                              );
+                            }).toList(),
+                            onChanged: (value) => setState(() => _selectedTeacherId = value),
+                            validator: (value) => value == null ? 'Pilih guru' : null,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Subject (only for subject-specific schedules)
+              if (_scheduleType == 'subject_specific') ...[
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Mata Pelajaran',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _subjectController,
+                          decoration: const InputDecoration(
+                            labelText: 'Nama Mata Pelajaran',
+                            border: OutlineInputBorder(),
+                            hintText: 'Contoh: Olahraga, Matematika, dll.',
+                          ),
+                          validator: (value) => value?.trim().isEmpty == true ? 'Masukkan nama mata pelajaran' : null,
+                        ),
+                      ],
                     ),
                   ),
-                  if (_message != null) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      _message!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: _message!.startsWith('Jadwal berhasil') ? Colors.green : Colors.red,
+                ),
+                const SizedBox(height: 16),
+              ] else ...[
+                // For daily morning, show a disabled field with the preset text
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Mata Pelajaran',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _subjectController,
+                          enabled: false,
+                          decoration: InputDecoration(
+                            labelText: 'Nama Mata Pelajaran',
+                            border: const OutlineInputBorder(),
+                            filled: true,
+                            fillColor: Colors.grey[200],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              
+              // Day Selection (only for subject-specific schedules)
+              if (_scheduleType == 'subject_specific') ...[
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Hari',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          value: _selectedDay,
+                          decoration: const InputDecoration(
+                            labelText: 'Pilih Hari',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'Senin', child: Text('Senin')),
+                            DropdownMenuItem(value: 'Selasa', child: Text('Selasa')),
+                            DropdownMenuItem(value: 'Rabu', child: Text('Rabu')),
+                            DropdownMenuItem(value: 'Kamis', child: Text('Kamis')),
+                            DropdownMenuItem(value: 'Jumat', child: Text('Jumat')),
+                            DropdownMenuItem(value: 'Sabtu', child: Text('Sabtu')),
+                            DropdownMenuItem(value: 'Minggu', child: Text('Minggu')),
+                          ],
+                          onChanged: (value) => setState(() => _selectedDay = value),
+                          validator: (value) => value == null ? 'Pilih hari' : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              
+              // Time Selection
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _scheduleType == 'daily_morning' ? 'Waktu Presensi Pagi' : 'Waktu Mata Pelajaran',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ListTile(
+                              title: const Text('Waktu Mulai'),
+                              subtitle: Text(_startTime?.format(context) ?? 'Pilih waktu'),
+                              trailing: const Icon(Icons.access_time),
+                              onTap: () => _pickTime(isStart: true),
+                            ),
+                          ),
+                          if (_scheduleType == 'subject_specific') ...[
+                            Expanded(
+                              child: ListTile(
+                                title: const Text('Waktu Selesai'),
+                                subtitle: Text(_endTime?.format(context) ?? 'Pilih waktu'),
+                                trailing: const Icon(Icons.access_time),
+                                onTap: () => _pickTime(isStart: false),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (_scheduleType == 'daily_morning') ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Presensi pagi akan berlangsung selama 30 menit',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              if (_message != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _message!.contains('berhasil') ? Colors.green[100] : Colors.red[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _message!,
+                    style: TextStyle(
+                      color: _message!.contains('berhasil') ? Colors.green[800] : Colors.red[800],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              
+              _isSaving
+                  ? const Center(child: CircularProgressIndicator())
+                  : SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          if (_formKey.currentState!.validate() && 
+                              (_scheduleType == 'daily_morning' && _startTime != null) ||
+                              (_scheduleType == 'subject_specific' && _selectedDay != null && _startTime != null && _endTime != null)) {
+                            setState(() => _isSaving = true);
+                            try {
+                              String timeString;
+                              if (_scheduleType == 'daily_morning') {
+                                timeString = _startTime!.format(context);
+                                // Set subject automatically for daily morning
+                                _subjectController.text = 'Presensi Pagi Harian';
+                              } else {
+                                timeString = '$_selectedDay ${_startTime!.format(context)}-${_endTime!.format(context)}';
+                              }
+                              
+                              final scheduleData = {
+                                'teacher_id': _selectedTeacherId,
+                                'subject': _subjectController.text.trim(),
+                                'class_id': _selectedClassId,
+                                'time': timeString,
+                                'schedule_type': _scheduleType,
+                                'day_of_week': _selectedDay,
+                              };
+                              
+                              if (widget.schedule != null && widget.schedule!['id'] != null) {
+                                // Edit mode
+                                await FirebaseFirestore.instance
+                                    .collection('schedules')
+                                    .doc(widget.schedule!['id'])
+                                    .update(scheduleData);
+                                setState(() {
+                                  _isSaving = false;
+                                  _message = 'Jadwal berhasil diperbarui!';
+                                });
+                              } else {
+                                // Create mode
+                                await FirebaseFirestore.instance.collection('schedules').add(scheduleData);
+                                setState(() {
+                                  _isSaving = false;
+                                  _message = 'Jadwal berhasil dibuat!';
+                                });
+                              }
+                            } catch (e) {
+                              setState(() {
+                                _isSaving = false;
+                                _message = 'Gagal: $e';
+                              });
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.save),
+                        label: Text(widget.schedule != null ? 'Update Jadwal' : 'Buat Jadwal'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
                       ),
                     ),
-                  ],
-                ],
-              ),
-            ),
+            ],
           ),
         ),
       ),

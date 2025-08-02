@@ -51,53 +51,63 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       Map<String, dynamic>? nearestSchedule;
 
       for (var doc in scheduleQuery.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        if (data['time'] != null && data['time'].toString().toLowerCase().contains(weekday.toLowerCase())) {
-          final timeString = data['time'].toString();
-          final regex = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})');
-          final match = regex.firstMatch(timeString);
-
-          if (match != null) {
-            final start = match.group(1)! + ':' + match.group(2)!;
-            final end = match.group(3)! + ':' + match.group(4)!;
-            final nowMinutes = now.hour * 60 + now.minute;
-            final startParts = start.split(':').map(int.parse).toList();
-            final endParts = end.split(':').map(int.parse).toList();
-            final startMinutes = startParts[0] * 60 + startParts[1];
-            final endMinutes = endParts[0] * 60 + endParts[1];
-
-            if (nowMinutes >= startMinutes && nowMinutes <= endMinutes) {
-              foundSchedule = data;
-              foundScheduleId = doc.id;
-              break;
-            } else if (startMinutes > nowMinutes) {
-              final scheduleDateTime = DateTime(now.year, now.month, now.day, startParts[0], startParts[1]);
-              if (nearestTime == null || scheduleDateTime.isBefore(nearestTime)) {
-                nearestTime = scheduleDateTime;
-                nearestSchedule = data;
-              }
-            }
+        final data = doc.data();
+        final scheduleType = data['schedule_type'] ?? 'subject_specific';
+        
+        if (scheduleType == 'daily_morning') {
+          // Check if it's morning time (6:30 AM)
+          final currentTime = now.hour * 60 + now.minute;
+          final morningTime = 6 * 60 + 30; // 6:30 AM
+          final morningEndTime = 7 * 60; // 7:00 AM
+          
+          if (currentTime >= morningTime && currentTime <= morningEndTime) {
+            foundSchedule = data;
+            foundScheduleId = doc.id;
+            break;
           }
-        } else if (data['time'] != null) {
-          // Check schedules for other days this week
-          final timeString = data['time'].toString();
-          final regex = RegExp(r'([A-Za-z]+) (\d{2}):(\d{2})-(\d{2}):(\d{2})');
-          final match = regex.firstMatch(timeString);
+        } else if (scheduleType == 'subject_specific') {
+          // Check subject-specific schedules
+          if (data['time'] != null) {
+            final timeString = data['time'].toString();
+            final regex = RegExp(r'([A-Za-z]+) (\d{2}):(\d{2})-(\d{2}):(\d{2})');
+            final match = regex.firstMatch(timeString);
 
-          if (match != null) {
-            final dayStr = match.group(1)!;
-            final start = match.group(2)! + ':' + match.group(3)!;
-            final startParts = start.split(':').map(int.parse).toList();
+            if (match != null) {
+              final dayStr = match.group(1)!;
+              final startHour = int.parse(match.group(2)!);
+              final startMinute = int.parse(match.group(3)!);
+              final endHour = int.parse(match.group(4)!);
+              final endMinute = int.parse(match.group(5)!);
 
-            final targetWeekday = _indoToWeekday(dayStr);
-            int daysDiff = (targetWeekday - now.weekday) % 7;
-            if (daysDiff < 0) daysDiff += 7;
+              final targetWeekday = _indoToWeekday(dayStr);
+              final nowMinutes = now.hour * 60 + now.minute;
+              final startMinutes = startHour * 60 + startMinute;
+              final endMinutes = endHour * 60 + endMinute;
 
-            final scheduleDateTime = DateTime(now.year, now.month, now.day + daysDiff, startParts[0], startParts[1]);
-            if (scheduleDateTime.isAfter(now)) {
-              if (nearestTime == null || scheduleDateTime.isBefore(nearestTime)) {
-                nearestTime = scheduleDateTime;
-                nearestSchedule = data;
+              if (targetWeekday == now.weekday) {
+                if (nowMinutes >= startMinutes && nowMinutes <= endMinutes) {
+                  foundSchedule = data;
+                  foundScheduleId = doc.id;
+                  break;
+                } else if (startMinutes > nowMinutes) {
+                  final scheduleDateTime = DateTime(now.year, now.month, now.day, startHour, startMinute);
+                  if (nearestTime == null || scheduleDateTime.isBefore(nearestTime)) {
+                    nearestTime = scheduleDateTime;
+                    nearestSchedule = data;
+                  }
+                }
+              } else {
+                // Check schedules for other days this week
+                int daysDiff = (targetWeekday - now.weekday) % 7;
+                if (daysDiff < 0) daysDiff += 7;
+
+                final scheduleDateTime = DateTime(now.year, now.month, now.day + daysDiff, startHour, startMinute);
+                if (scheduleDateTime.isAfter(now)) {
+                  if (nearestTime == null || scheduleDateTime.isBefore(nearestTime)) {
+                    nearestTime = scheduleDateTime;
+                    nearestSchedule = data;
+                  }
+                }
               }
             }
           }
@@ -174,23 +184,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         .where(FieldPath.documentId, whereIn: studentIds)
         .get();
 
-      students = studentsQuery.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return {
-          'id': doc.id,
-          'name': data['name'] ?? '',
-        };
+      final studentsList = studentsQuery.docs.map((doc) => {
+        'id': doc.id,
+        ...doc.data(),
       }).toList();
 
-      // If no attendance exists, initialize all as hadir
-      if (!attendanceExistsToday) {
-        attendance = { for (var s in students) s['id']: 'hadir' };
-      }
-      setState(() { isLoading = false; });
+      setState(() {
+        students = studentsList;
+        isLoading = false;
+      });
     } catch (e) {
       setState(() {
         isLoading = false;
-        errorMsg = 'Gagal memuat data: $e';
+        errorMsg = 'Error: $e';
       });
     }
   }
@@ -205,45 +211,148 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final userInfo = widget.userInfo ?? {};
     return Scaffold(
-      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text('Presensi'),
-        backgroundColor: Colors.white,
-        elevation: 1,
-        leading: IconButton(
+        backgroundColor: Colors.teal,
+        foregroundColor: Colors.white,
+        leading: widget.showBackButton ? IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
-        ),
+        ) : null,
       ),
       body: isLoading
         ? const Center(child: CircularProgressIndicator())
         : errorMsg != null
-          ? Center(child: Text(errorMsg!, style: const TextStyle(color: Colors.red)))
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                    const SizedBox(height: 16),
+                    Text(
+                      errorMsg!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (className != null)
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text('Kelas: $className', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  ),
-                if (attendanceExistsToday)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
-                    child: Text('Presensi untuk jadwal ini sudah diisi hari ini.', style: TextStyle(color: Colors.green[700], fontWeight: FontWeight.bold)),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: ElevatedButton.icon(
-                    onPressed: _setAllHadir,
-                    icon: const Icon(Icons.check_circle),
-                    label: const Text('Hadir Semua'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                // Schedule Info Card
+                Card(
+                  margin: const EdgeInsets.all(16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.schedule,
+                              color: Colors.teal[600],
+                              size: 24,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Informasi Jadwal',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.teal[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Kelas: $className',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Mata Pelajaran: ${students.isNotEmpty ? _getScheduleSubject() : 'Loading...'}',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Jenis: ${_getScheduleTypeDisplay()}',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Waktu: ${_getScheduleTimeDisplay()}',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
+                        if (attendanceExistsToday) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.orange[100],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'Presensi untuk hari ini sudah ada',
+                              style: TextStyle(
+                                color: Colors.orange[800],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 8),
+                
+                // Quick Actions
+                if (!attendanceExistsToday) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                for (var student in students) {
+                                  attendance[student['id']] = 'hadir';
+                                }
+                              });
+                            },
+                            icon: const Icon(Icons.check_circle),
+                            label: const Text('Hadir Semua'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                for (var student in students) {
+                                  attendance[student['id']] = 'alfa';
+                                }
+                              });
+                            },
+                            icon: const Icon(Icons.cancel),
+                            label: const Text('Alfa Semua'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                
+                // Students List
                 Expanded(
                   child: ListView.builder(
                     itemCount: students.length,
@@ -252,21 +361,30 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                         child: ListTile(
-                          title: Text(s['name']),
-                          trailing: DropdownButton<String>(
-                            value: attendance[s['id']],
-                            items: const [
-                              DropdownMenuItem(value: 'hadir', child: Text('Hadir')),
-                              DropdownMenuItem(value: 'sakit', child: Text('Sakit')),
-                              DropdownMenuItem(value: 'izin', child: Text('Izin')),
-                              DropdownMenuItem(value: 'alfa', child: Text('Alfa')),
-                            ],
-                            onChanged: (value) {
-                              setState(() {
-                                attendance[s['id']] = value!;
-                              });
-                            },
-                          ),
+                          title: Text(s['name'] ?? 'Nama tidak tersedia'),
+                          subtitle: Text('ID: ${s['id']}'),
+                          trailing: attendanceExistsToday 
+                            ? Text(
+                                attendance[s['id']] ?? 'Tidak ada data',
+                                style: TextStyle(
+                                  color: _getAttendanceColor(attendance[s['id']]),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              )
+                            : DropdownButton<String>(
+                                value: attendance[s['id']] ?? 'hadir',
+                                items: const [
+                                  DropdownMenuItem(value: 'hadir', child: Text('Hadir')),
+                                  DropdownMenuItem(value: 'sakit', child: Text('Sakit')),
+                                  DropdownMenuItem(value: 'izin', child: Text('Izin')),
+                                  DropdownMenuItem(value: 'alfa', child: Text('Alfa')),
+                                ],
+                                onChanged: (value) {
+                                  setState(() {
+                                    attendance[s['id']] = value!;
+                                  });
+                                },
+                              ),
                         ),
                       );
                     },
@@ -274,15 +392,57 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
               ],
             ),
-      floatingActionButton: isLoading || errorMsg != null
+      floatingActionButton: isLoading || errorMsg != null || attendanceExistsToday
         ? null
         : FloatingActionButton.extended(
-            onPressed: attendanceExistsToday ? null : _saveAttendance,
+            onPressed: _saveAttendance,
             icon: const Icon(Icons.save),
-            label: attendanceExistsToday ? const Text('Presensi Sudah Disimpan') : const Text('Simpan'),
-            backgroundColor: attendanceExistsToday ? Colors.grey : Colors.teal,
+            label: const Text('Simpan Presensi'),
+            backgroundColor: Colors.teal,
           ),
     );
+  }
+
+  String _getScheduleSubject() {
+    // Get subject from the current schedule
+    if (scheduleId != null) {
+      // This would need to be implemented to get the subject from the schedule
+      return 'Loading...';
+    }
+    return 'Tidak tersedia';
+  }
+
+  String _getScheduleTypeDisplay() {
+    // Get schedule type display
+    if (scheduleId != null) {
+      // This would need to be implemented to get the schedule type
+      return 'Loading...';
+    }
+    return 'Tidak tersedia';
+  }
+
+  String _getScheduleTimeDisplay() {
+    // Get schedule time display
+    if (scheduleId != null) {
+      // This would need to be implemented to get the schedule time
+      return 'Loading...';
+    }
+    return 'Tidak tersedia';
+  }
+
+  Color _getAttendanceColor(String? status) {
+    switch (status) {
+      case 'hadir':
+        return Colors.green;
+      case 'sakit':
+        return Colors.orange;
+      case 'izin':
+        return Colors.blue;
+      case 'alfa':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
   }
 
   Future<void> _saveAttendance() async {
@@ -303,7 +463,27 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
     try {
       if (connectivityService.isConnected) {
-        // Online: Save directly to Firestore
+        // Online: Check if attendance already exists before saving
+        final today = DateTime(now.year, now.month, now.day);
+        final attendanceExists = await OfflineSyncService.checkAttendanceExists(
+          scheduleId!,
+          userInfo['nuptk'] ?? '',
+          today,
+        );
+
+        if (attendanceExists) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Presensi untuk hari ini sudah ada!'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+
+        // Save directly to Firestore
         await FirebaseFirestore.instance.collection('attendances').add({
           ...attendanceData,
           'created_at': FieldValue.serverTimestamp(),
@@ -318,7 +498,31 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           );
         }
       } else {
-        // Offline: Save to local storage for later sync
+        // Offline: Check pending attendance to avoid duplicates
+        final pendingAttendance = await LocalStorageService.getPendingAttendance();
+        final today = DateTime(now.year, now.month, now.day);
+        final todayString = today.toIso8601String();
+        
+        // Check if we already have pending attendance for today
+        final hasPendingToday = pendingAttendance.any((pending) =>
+          pending['schedule_id'] == scheduleId &&
+          pending['teacher_id'] == userInfo['nuptk'] &&
+          pending['date'] == todayString
+        );
+
+        if (hasPendingToday) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Presensi offline untuk hari ini sudah ada!'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+
+        // Save to local storage for later sync
         await LocalStorageService.savePendingAttendance(attendanceData);
         
         if (mounted) {

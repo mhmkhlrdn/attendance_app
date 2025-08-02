@@ -14,6 +14,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   List<Map<String, dynamic>> _pendingAttendance = [];
   bool _isOnline = true;
   bool _isLoading = false;
+  Map<String, dynamic> _syncStatus = {};
 
   @override
   void initState() {
@@ -36,6 +37,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         setState(() {
           _isOnline = isOnline;
         });
+        _loadSyncStatus();
       }
     });
   }
@@ -47,6 +49,20 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       setState(() {
         _isOnline = isOnline;
       });
+      _loadSyncStatus();
+    }
+  }
+
+  Future<void> _loadSyncStatus() async {
+    try {
+      final status = await OfflineSyncService.getSyncStatus();
+      if (mounted) {
+        setState(() {
+          _syncStatus = status;
+        });
+      }
+    } catch (e) {
+      print('Error loading sync status: $e');
     }
   }
 
@@ -61,6 +77,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         _pendingAttendance = pendingData;
         _isLoading = false;
       });
+      _loadSyncStatus();
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -89,16 +106,36 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
     });
 
     try {
+      final initialCount = _pendingAttendance.length;
       await OfflineSyncService.syncPendingAttendance();
       await _loadPendingData();
       
+      final finalCount = _pendingAttendance.length;
+      final syncedCount = initialCount - finalCount;
+      
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sinkronisasi berhasil!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (syncedCount > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Berhasil menyinkronkan $syncedCount presensi!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else if (initialCount > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Presensi sudah ada di server. Data duplikat dicegah.'),
+              backgroundColor: Colors.blue,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Tidak ada data yang perlu disinkronkan.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -114,6 +151,13 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  String _formatDateTime(dynamic timestamp) {
+    if (timestamp == null) return 'N/A';
+    final date = DateTime.tryParse(timestamp.toString());
+    if (date == null) return 'Invalid Date';
+    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute}';
   }
 
   @override
@@ -218,6 +262,59 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             ),
                           ),
                         ],
+                      ],
+                    ),
+                  ),
+                ),
+                
+                // Sync status card
+                Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              color: Colors.blue,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Status Sinkronisasi',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (_syncStatus['lastSync'] != null) ...[
+                          Text(
+                            'Terakhir sinkronisasi: ${_formatDateTime(_syncStatus['lastSync'])}',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ] else ...[
+                          Text(
+                            'Belum pernah sinkronisasi',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 4),
+                        Text(
+                          'Fitur pencegahan duplikat: Aktif',
+                          style: TextStyle(
+                            color: Colors.green[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ],
                     ),
                   ),

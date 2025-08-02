@@ -117,10 +117,31 @@ class LocalStorageService {
     return [];
   }
 
+  /// Get count of pending attendance records
+  static Future<int> getPendingAttendanceCount() async {
+    final pendingAttendance = await getPendingAttendance();
+    return pendingAttendance.length;
+  }
+
   /// Clear pending attendance after successful sync
   static Future<void> clearPendingAttendance() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pendingAttendanceKey);
+  }
+
+  /// Remove specific pending attendance record
+  static Future<void> removePendingAttendance(String scheduleId, String teacherId, String date) async {
+    final prefs = await SharedPreferences.getInstance();
+    final pendingList = await getPendingAttendance();
+    
+    // Remove the specific attendance record
+    pendingList.removeWhere((attendance) =>
+      attendance['schedule_id'] == scheduleId &&
+      attendance['teacher_id'] == teacherId &&
+      attendance['date'] == date
+    );
+    
+    await prefs.setString(_pendingAttendanceKey, jsonEncode(pendingList));
   }
 
   /// Save last sync timestamp

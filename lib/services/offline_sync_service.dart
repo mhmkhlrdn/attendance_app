@@ -18,6 +18,19 @@ class OfflineSyncService {
 
       for (var attendanceData in pendingAttendance) {
         try {
+          // Check if attendance already exists to prevent duplicates
+          final existingAttendance = await _checkExistingAttendance(attendanceData);
+          if (existingAttendance) {
+            print('Attendance already exists for class: ${attendanceData['class_id']}, date: ${attendanceData['date']}. Skipping...');
+            // Remove this pending record since it already exists
+            await LocalStorageService.removePendingAttendance(
+              attendanceData['schedule_id'] as String,
+              attendanceData['teacher_id'] as String,
+              attendanceData['date'] as String,
+            );
+            continue;
+          }
+
           // Remove the local timestamp and add server timestamp
           attendanceData.remove('local_timestamp');
           
@@ -28,19 +41,80 @@ class OfflineSyncService {
           
           await _firestore.collection('attendances').add(attendanceData);
           print('Synced attendance for class: ${attendanceData['class_id']}');
+          
+          // Remove this specific pending record after successful sync
+          await LocalStorageService.removePendingAttendance(
+            attendanceData['schedule_id'] as String,
+            attendanceData['teacher_id'] as String,
+            attendanceData['date'] as String,
+          );
         } catch (e) {
           print('Error syncing attendance: $e');
           // Continue with other records even if one fails
         }
       }
 
-      // Clear pending attendance after successful sync
-      await LocalStorageService.clearPendingAttendance();
       await LocalStorageService.saveLastSync(DateTime.now());
-      
       print('Successfully synced all pending attendance records');
     } catch (e) {
       print('Error during sync: $e');
+    }
+  }
+
+  /// Check if attendance record already exists
+  static Future<bool> _checkExistingAttendance(Map<String, dynamic> attendanceData) async {
+    try {
+      final classId = attendanceData['class_id'] as String?;
+      final scheduleId = attendanceData['schedule_id'] as String?;
+      final teacherId = attendanceData['teacher_id'] as String?;
+      final dateString = attendanceData['date'] as String?;
+      
+      if (classId == null || scheduleId == null || teacherId == null || dateString == null) {
+        return false;
+      }
+
+      // Parse the date string to get the date range for query
+      final date = DateTime.parse(dateString);
+      final startOfDay = DateTime(date.year, date.month, date.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+
+      // Query for existing attendance records
+      final query = await _firestore
+          .collection('attendances')
+          .where('class_id', isEqualTo: classId)
+          .where('schedule_id', isEqualTo: scheduleId)
+          .where('teacher_id', isEqualTo: teacherId)
+          .where('date', isGreaterThanOrEqualTo: startOfDay)
+          .where('date', isLessThan: endOfDay)
+          .limit(1)
+          .get();
+
+      return query.docs.isNotEmpty;
+    } catch (e) {
+      print('Error checking existing attendance: $e');
+      return false;
+    }
+  }
+
+  /// Check if attendance exists for a specific schedule, teacher, and date
+  static Future<bool> checkAttendanceExists(String scheduleId, String teacherId, DateTime date) async {
+    try {
+      final startOfDay = DateTime(date.year, date.month, date.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+
+      final query = await _firestore
+          .collection('attendances')
+          .where('schedule_id', isEqualTo: scheduleId)
+          .where('teacher_id', isEqualTo: teacherId)
+          .where('date', isGreaterThanOrEqualTo: startOfDay)
+          .where('date', isLessThan: endOfDay)
+          .limit(1)
+          .get();
+
+      return query.docs.isNotEmpty;
+    } catch (e) {
+      print('Error checking attendance existence: $e');
+      return false;
     }
   }
 
@@ -98,6 +172,20 @@ class OfflineSyncService {
     });
   }
 
+  /// Get sync status information
+  static Future<Map<String, dynamic>> getSyncStatus() async {
+    final pendingCount = await LocalStorageService.getPendingAttendanceCount();
+    final lastSync = await LocalStorageService.getLastSync();
+    final isConnected = _connectivityService.isConnected;
+    
+    return {
+      'pendingCount': pendingCount,
+      'lastSync': lastSync,
+      'isConnected': isConnected,
+      'hasPendingData': pendingCount > 0,
+    };
+  }
+
   /// Get current schedule for teacher (from local storage or online)
   static Future<Map<String, dynamic>?> getCurrentSchedule(String teacherId) async {
     try {
@@ -114,20 +202,37 @@ class OfflineSyncService {
 
         for (var doc in schedulesQuery.docs) {
           final schedule = doc.data();
-          final timeString = schedule['time'] as String? ?? '';
+          final scheduleType = schedule['schedule_type'] ?? 'subject_specific';
           
-          if (timeString.contains(currentDay)) {
-            // Parse time range (e.g., "Senin 08:00-09:00")
-            final timeMatch = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})').firstMatch(timeString);
-            if (timeMatch != null) {
-              final startTime = '${timeMatch.group(1)}:${timeMatch.group(2)}';
-              final endTime = '${timeMatch.group(3)}:${timeMatch.group(4)}';
-              
-              if (_isTimeInRange(currentTime, startTime, endTime)) {
-                return {
-                  'id': doc.id,
-                  ...schedule,
-                };
+          if (scheduleType == 'daily_morning') {
+            // Check if it's morning time (6:30 AM)
+            final currentMinutes = now.hour * 60 + now.minute;
+            final morningStart = 6 * 60 + 30; // 6:30 AM
+            final morningEnd = 7 * 60; // 7:00 AM
+            
+            if (currentMinutes >= morningStart && currentMinutes <= morningEnd) {
+              return {
+                'id': doc.id,
+                ...schedule,
+              };
+            }
+          } else if (scheduleType == 'subject_specific') {
+            // Check subject-specific schedules
+            final timeString = schedule['time'] as String? ?? '';
+            
+            if (timeString.contains(currentDay)) {
+              // Parse time range (e.g., "Senin 08:00-09:00")
+              final timeMatch = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})').firstMatch(timeString);
+              if (timeMatch != null) {
+                final startTime = '${timeMatch.group(1)}:${timeMatch.group(2)}';
+                final endTime = '${timeMatch.group(3)}:${timeMatch.group(4)}';
+                
+                if (_isTimeInRange(currentTime, startTime, endTime)) {
+                  return {
+                    'id': doc.id,
+                    ...schedule,
+                  };
+                }
               }
             }
           }
@@ -140,16 +245,30 @@ class OfflineSyncService {
         final currentTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
         for (var schedule in schedules) {
-          final timeString = schedule['time'] as String? ?? '';
+          final scheduleType = schedule['schedule_type'] ?? 'subject_specific';
           
-          if (timeString.contains(currentDay)) {
-            final timeMatch = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})').firstMatch(timeString);
-            if (timeMatch != null) {
-              final startTime = '${timeMatch.group(1)}:${timeMatch.group(2)}';
-              final endTime = '${timeMatch.group(3)}:${timeMatch.group(4)}';
-              
-              if (_isTimeInRange(currentTime, startTime, endTime)) {
-                return schedule;
+          if (scheduleType == 'daily_morning') {
+            // Check if it's morning time (6:30 AM)
+            final currentMinutes = now.hour * 60 + now.minute;
+            final morningStart = 6 * 60 + 30; // 6:30 AM
+            final morningEnd = 7 * 60; // 7:00 AM
+            
+            if (currentMinutes >= morningStart && currentMinutes <= morningEnd) {
+              return schedule;
+            }
+          } else if (scheduleType == 'subject_specific') {
+            // Check subject-specific schedules
+            final timeString = schedule['time'] as String? ?? '';
+            
+            if (timeString.contains(currentDay)) {
+              final timeMatch = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})').firstMatch(timeString);
+              if (timeMatch != null) {
+                final startTime = '${timeMatch.group(1)}:${timeMatch.group(2)}';
+                final endTime = '${timeMatch.group(3)}:${timeMatch.group(4)}';
+                
+                if (_isTimeInRange(currentTime, startTime, endTime)) {
+                  return schedule;
+                }
               }
             }
           }
