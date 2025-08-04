@@ -263,7 +263,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   ],
                                 ).createShader(bounds),
                                 child: Text(
-                                  'SIABSDEN',
+                                  'SIABSEN',
                                   style: TextStyle(
                                     fontSize: 32,
                                     fontWeight: FontWeight.bold,
