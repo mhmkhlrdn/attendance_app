@@ -37,15 +37,33 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     setState(() => _isLoading = true);
     
     try {
+      // First, let's check what attendance records exist without any filters
+      print('=== DEBUGGING: Checking all attendance records ===');
+      final allAttendanceQuery = FirebaseFirestore.instance.collection('attendances');
+      final allSnapshot = await allAttendanceQuery.get();
+      print('Total attendance records in database: ${allSnapshot.docs.length}');
+      
+      for (var i = 0; i < allSnapshot.docs.length; i++) {
+        final doc = allSnapshot.docs[i];
+        final data = doc.data() as Map<String, dynamic>;
+        print('Record ${i + 1}: ${doc.id}');
+        print('  school_id: ${data['school_id']}');
+        print('  teacher_id: ${data['teacher_id']}');
+        print('  class_id: ${data['class_id']}');
+        print('  date: ${data['date']}');
+      }
+      
       Query attendanceQuery = FirebaseFirestore.instance.collection('attendances').orderBy('date', descending: true);
       
       if (widget.role == 'admin') {
         print('Loading all attendance data (admin mode)');
-        if (_selectedClassId != null) {
-          attendanceQuery = attendanceQuery.where('class_id', isEqualTo: _selectedClassId);
-          print('Filtering by class ID: $_selectedClassId');
-        }
+        print('Admin school_id: ${widget.userInfo['school_id']}');
+        
+        // For admin, get all records and filter manually to avoid index issues
+        attendanceQuery = FirebaseFirestore.instance.collection('attendances');
+        print('Getting all attendance records for manual filtering');
       } else {
+        // For teachers, filter by teacher_id (which already includes school_id from login)
         attendanceQuery = attendanceQuery.where('teacher_id', isEqualTo: widget.userInfo['nuptk']);
         print('Filtering by teacher NUPTK: ${widget.userInfo['nuptk']}');
       }
@@ -56,7 +74,85 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       
       final attendances = snapshot.docs;
       
-      if (attendances.isEmpty) {
+      // For admin users, filter old records that don't have school_id by checking teacher's school_id
+      List<QueryDocumentSnapshot> filteredAttendances = attendances;
+      if (widget.role == 'admin') {
+        print('=== FILTERING OLD RECORDS BY TEACHER SCHOOL_ID ===');
+        print('Admin school_id: ${widget.userInfo['school_id']}');
+        print('Selected class_id: $_selectedClassId');
+        print('Total records to filter: ${attendances.length}');
+        filteredAttendances = [];
+        
+        for (var doc in attendances) {
+          final data = doc.data() as Map<String, dynamic>;
+          final schoolId = data['school_id'];
+          final classId = data['class_id'];
+          final teacherId = data['teacher_id'];
+          
+          print('\n--- Processing record ${doc.id} ---');
+          print('  school_id: $schoolId');
+          print('  class_id: $classId');
+          print('  teacher_id: $teacherId');
+          
+          // If class filter is applied, check if this record matches the selected class
+          if (_selectedClassId != null && classId != _selectedClassId) {
+            print('✗ Record ${doc.id}: class_id mismatch (${classId} vs ${_selectedClassId})');
+            continue;
+          }
+          
+          if (schoolId != null) {
+            // Record has school_id, check if it matches admin's school
+            if (schoolId == widget.userInfo['school_id']) {
+              filteredAttendances.add(doc);
+              print('✓ Record ${doc.id}: school_id matches (${schoolId})');
+            } else {
+              print('✗ Record ${doc.id}: school_id mismatch (${schoolId} vs ${widget.userInfo['school_id']})');
+            }
+          } else {
+            // Record doesn't have school_id, check teacher's school_id
+            if (teacherId != null) {
+              try {
+                print('  Checking teacher school_id for teacher: $teacherId');
+                final teacherDoc = await FirebaseFirestore.instance
+                    .collection('teachers')
+                    .where('nuptk', isEqualTo: teacherId)
+                    .get();
+                
+                print('  Teacher query found ${teacherDoc.docs.length} documents');
+                
+                if (teacherDoc.docs.isNotEmpty) {
+                  final teacherData = teacherDoc.docs.first.data();
+                  final teacherSchoolId = teacherData['school_id'];
+                  final teacherName = teacherData['name'];
+                  
+                  print('  Teacher name: $teacherName');
+                  print('  Teacher school_id: $teacherSchoolId');
+                  
+                  if (teacherSchoolId == widget.userInfo['school_id']) {
+                    filteredAttendances.add(doc);
+                    print('✓ Record ${doc.id}: teacher school_id matches (${teacherSchoolId})');
+                  } else {
+                    print('✗ Record ${doc.id}: teacher school_id mismatch (${teacherSchoolId} vs ${widget.userInfo['school_id']})');
+                  }
+                } else {
+                  print('✗ Record ${doc.id}: teacher not found (${teacherId})');
+                }
+              } catch (e) {
+                print('✗ Record ${doc.id}: error checking teacher school_id: $e');
+              }
+            } else {
+              print('✗ Record ${doc.id}: no teacher_id found');
+            }
+          }
+        }
+        
+        print('\n=== FILTERING SUMMARY ===');
+        print('Original records: ${attendances.length}');
+        print('Filtered records: ${filteredAttendances.length}');
+        print('Records excluded: ${attendances.length - filteredAttendances.length}');
+      }
+      
+      if (filteredAttendances.isEmpty) {
         print('WARNING: No attendance records found!');
         setState(() {
           _monthlyData = {};
@@ -72,8 +168,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       final months = <String>[];
 
       print('\n--- Processing attendance records ---');
-      for (var i = 0; i < attendances.length; i++) {
-        final doc = attendances[i];
+      for (var i = 0; i < filteredAttendances.length; i++) {
+        final doc = filteredAttendances[i];
         final data = doc.data() as Map<String, dynamic>;
         print('Record ${i + 1}: ${doc.id}');
         print('  Data: $data');
@@ -185,7 +281,11 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     setState(() => _isLoadingClasses = true);
     
     try {
-      final classesQuery = await FirebaseFirestore.instance.collection('classes').get();
+      final classesQuery = await FirebaseFirestore.instance
+          .collection('classes')
+          .where('school_id', isEqualTo: widget.userInfo['school_id'])
+          .get();
+      
       final classes = classesQuery.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return {
@@ -203,7 +303,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
         _isLoadingClasses = false;
       });
       
-      print('Loaded ${classes.length} classes for admin filtering');
+      print('Loaded ${classes.length} classes for school: ${widget.userInfo['school_id']}');
     } catch (e) {
       print('Error loading classes: $e');
       setState(() => _isLoadingClasses = false);
@@ -358,7 +458,15 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     for (var attendance in monthData) {
       final data = attendance['data'] as Map<String, dynamic>;
       final studentIds = List<String>.from(data['student_ids'] ?? []);
-      print('  Attendance ${attendance['id']}: ${studentIds.length} students');
+      final classId = data['class_id'];
+      
+      print('  Attendance ${attendance['id']}: ${studentIds.length} students, class: $classId');
+      
+      // If a class filter is applied, only include students from that class
+      if (_selectedClassId != null && classId != _selectedClassId) {
+        print('    Skipping students from different class (${classId} vs ${_selectedClassId})');
+        continue;
+      }
       
       for (var studentId in studentIds) {
         if (!students.containsKey(studentId)) {

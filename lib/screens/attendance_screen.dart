@@ -604,6 +604,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       'class_id': classId,
       'schedule_id': scheduleId,
       'teacher_id': userInfo['nuptk'] ?? '',
+      'school_id': userInfo['school_id'] ?? '',
       'date': DateTime(now.year, now.month, now.day),
       'attendance': attendance,
       'student_ids': attendance.keys.toList(),

@@ -7,7 +7,8 @@ import '../services/student_helper_service.dart';
 
 class StudentListScreen extends StatefulWidget {
   final String role;
-  const StudentListScreen({Key? key, required this.role}) : super(key: key);
+  final Map<String, String>? userInfo;
+  const StudentListScreen({Key? key, required this.role, this.userInfo}) : super(key: key);
 
   @override
   State<StudentListScreen> createState() => _StudentListScreenState();
@@ -127,7 +128,12 @@ class _StudentListScreenState extends State<StudentListScreen> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('students').snapshots(),
+              stream: widget.userInfo != null 
+                ? FirebaseFirestore.instance
+                    .collection('students')
+                    .where('school_id', isEqualTo: widget.userInfo!['school_id'])
+                    .snapshots()
+                : FirebaseFirestore.instance.collection('students').snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -198,6 +204,7 @@ class _StudentListScreenState extends State<StudentListScreen> {
                                   MaterialPageRoute(
                                     builder: (context) => StudentFormScreen(
                                       student: {...data, 'id': student.id},
+                                      userInfo: widget.userInfo,
                                     ),
                                   ),
                                 );
@@ -227,7 +234,7 @@ class _StudentListScreenState extends State<StudentListScreen> {
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => const StudentFormScreen(),
+              builder: (context) => StudentFormScreen(userInfo: widget.userInfo),
             ),
           );
         },

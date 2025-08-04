@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 class CreateTeacherScreen extends StatefulWidget {
   final Map<String, dynamic>? teacher; // For edit mode
-  const CreateTeacherScreen({Key? key, this.teacher}) : super(key: key);
+  final Map<String, String>? userInfo; // For school_id
+  const CreateTeacherScreen({Key? key, this.teacher, this.userInfo}) : super(key: key);
 
   @override
   State<CreateTeacherScreen> createState() => _CreateTeacherScreenState();
@@ -126,6 +127,7 @@ class _CreateTeacherScreenState extends State<CreateTeacherScreen> {
                             'nuptk': _nuptkController.text.trim(),
                             'password': _passwordController.text.trim(),
                             'role': _role,
+                            'school_id': widget.userInfo?['school_id'] ?? 'school_1', // Default to school_1 if not provided
                           };
                           
                           if (widget.teacher != null && widget.teacher!['id'] != null) {

@@ -12,6 +12,7 @@ import 'teacher_list_screen.dart';
 import 'attendance_history_screen.dart';
 import 'attendance_report_screen.dart';
 import 'promotion_screen.dart';
+import 'data_migration_screen.dart';
 import '../services/local_storage_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/offline_sync_service.dart';
@@ -35,9 +36,9 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
 
   List<Widget> _getScreens() {
     return [
-      StudentListScreen(role: widget.role),
-      TeacherListScreen(role: widget.role),
-      ClassListScreen(role: widget.role),
+      StudentListScreen(role: widget.role, userInfo: widget.userInfo),
+      TeacherListScreen(role: widget.role, userInfo: widget.userInfo),
+      ClassListScreen(role: widget.role, userInfo: widget.userInfo),
       ScheduleListScreen(role: widget.role, userInfo: widget.userInfo),
     ];
   }
@@ -237,6 +238,19 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const SyncStatusScreen(),
+                      ),
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.storage, color: Colors.purple),
+                  title: const Text('Migrasi Data'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DataMigrationScreen(),
                       ),
                     );
                   },

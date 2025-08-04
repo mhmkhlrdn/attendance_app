@@ -5,7 +5,8 @@ import 'create_teacher_screen.dart';
 
 class TeacherListScreen extends StatefulWidget {
   final String role;
-  const TeacherListScreen({Key? key, required this.role}) : super(key: key);
+  final Map<String, String>? userInfo;
+  const TeacherListScreen({Key? key, required this.role, this.userInfo}) : super(key: key);
 
   @override
   State<TeacherListScreen> createState() => _TeacherListScreenState();
@@ -98,7 +99,12 @@ class _TeacherListScreenState extends State<TeacherListScreen> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('teachers').snapshots(),
+              stream: widget.userInfo != null 
+                ? FirebaseFirestore.instance
+                    .collection('teachers')
+                    .where('school_id', isEqualTo: widget.userInfo!['school_id'])
+                    .snapshots()
+                : FirebaseFirestore.instance.collection('teachers').snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -148,10 +154,13 @@ class _TeacherListScreenState extends State<TeacherListScreen> {
                                 await Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => CreateTeacherScreen(teacher: {
-                                      'id': teacherDoc.id,
-                                      ...data,
-                                    }),
+                                    builder: (context) => CreateTeacherScreen(
+                                      teacher: {
+                                        'id': teacherDoc.id,
+                                        ...data,
+                                      },
+                                      userInfo: widget.userInfo,
+                                    ),
                                   ),
                                 );
                               },
@@ -198,7 +207,7 @@ class _TeacherListScreenState extends State<TeacherListScreen> {
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => const CreateTeacherScreen(),
+              builder: (context) => CreateTeacherScreen(userInfo: widget.userInfo),
             ),
           );
         },

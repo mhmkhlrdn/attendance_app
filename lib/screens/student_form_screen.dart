@@ -3,8 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class StudentFormScreen extends StatefulWidget {
   final Map<String, dynamic>? student; // Pass null for add, or student data for edit
+  final Map<String, String>? userInfo; // For school_id
 
-  const StudentFormScreen({Key? key, this.student}) : super(key: key);
+  const StudentFormScreen({Key? key, this.student, this.userInfo}) : super(key: key);
 
   @override
   State<StudentFormScreen> createState() => _StudentFormScreenState();
@@ -71,6 +72,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       'gender': _selectedGender,
       'parent_phone': _parentPhoneController.text.trim(),
       'status': 'active',
+      'school_id': widget.userInfo?['school_id'] ?? 'school_1', // Default to school_1 if not provided
       'enrollments': [
         {
           'grade': selectedGrade ?? '',

@@ -7,7 +7,8 @@ import 'create_class_screen.dart';
 
 class ClassListScreen extends StatefulWidget {
   final String role;
-  const ClassListScreen({Key? key, required this.role}) : super(key: key);
+  final Map<String, String>? userInfo;
+  const ClassListScreen({Key? key, required this.role, this.userInfo}) : super(key: key);
 
   @override
   State<ClassListScreen> createState() => _ClassListScreenState();
@@ -89,7 +90,12 @@ class _ClassListScreenState extends State<ClassListScreen> {
                 const SizedBox(width: 8),
                 Builder(
                   builder: (context) {
-                    final classes = FirebaseFirestore.instance.collection('classes').snapshots();
+                    final classes = widget.userInfo != null 
+                      ? FirebaseFirestore.instance
+                          .collection('classes')
+                          .where('school_id', isEqualTo: widget.userInfo!['school_id'])
+                          .snapshots()
+                      : FirebaseFirestore.instance.collection('classes').snapshots();
                     return StreamBuilder<QuerySnapshot>(
                       stream: classes,
                       builder: (context, snapshot) {
@@ -115,7 +121,12 @@ class _ClassListScreenState extends State<ClassListScreen> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('classes').snapshots(),
+              stream: widget.userInfo != null 
+                ? FirebaseFirestore.instance
+                    .collection('classes')
+                    .where('school_id', isEqualTo: widget.userInfo!['school_id'])
+                    .snapshots()
+                : FirebaseFirestore.instance.collection('classes').snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -185,10 +196,13 @@ class _ClassListScreenState extends State<ClassListScreen> {
                                 await Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => CreateClassScreen(classData: {
-                                      'id': classDoc.id,
-                                      ...data,
-                                    }),
+                                    builder: (context) => CreateClassScreen(
+                                      classData: {
+                                        'id': classDoc.id,
+                                        ...data,
+                                      },
+                                      userInfo: widget.userInfo,
+                                    ),
                                   ),
                                 );
                               },
@@ -235,7 +249,7 @@ class _ClassListScreenState extends State<ClassListScreen> {
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => const CreateClassScreen(),
+              builder: (context) => CreateClassScreen(userInfo: widget.userInfo),
             ),
           );
         },

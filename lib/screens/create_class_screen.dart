@@ -3,7 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CreateClassScreen extends StatefulWidget {
   final Map<String, dynamic>? classData; // For edit mode
-  const CreateClassScreen({Key? key, this.classData}) : super(key: key);
+  final Map<String, String>? userInfo; // For school_id
+  const CreateClassScreen({Key? key, this.classData, this.userInfo}) : super(key: key);
 
   @override
   State<CreateClassScreen> createState() => _CreateClassScreenState();
@@ -54,6 +55,7 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
         'grade': _gradeController.text.trim(),
         'year_id': _selectedYearId,
         'students': widget.classData?['students'] ?? [], // Keep existing students if editing
+        'school_id': widget.userInfo?['school_id'] ?? 'school_1', // Default to school_1 if not provided
       };
       
       if (widget.classData != null && widget.classData!['id'] != null) {

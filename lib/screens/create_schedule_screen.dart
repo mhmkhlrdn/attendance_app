@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 class CreateScheduleScreen extends StatefulWidget {
   final Map<String, dynamic>? schedule; // For edit mode
-  const CreateScheduleScreen({Key? key, this.schedule}) : super(key: key);
+  final Map<String, String>? userInfo; // For school_id
+  const CreateScheduleScreen({Key? key, this.schedule, this.userInfo}) : super(key: key);
 
   @override
   State<CreateScheduleScreen> createState() => _CreateScheduleScreenState();
@@ -228,7 +229,7 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                       ),
                       const SizedBox(height: 12),
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('teachers').snapshots(),
+                        stream: FirebaseFirestore.instance.collection('teachers').where('school_id', isEqualTo: widget.userInfo!['school_id']).snapshots(),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState == ConnectionState.waiting) {
                             return const Center(child: CircularProgressIndicator());
@@ -465,6 +466,7 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                                 'time': timeString,
                                 'schedule_type': _scheduleType,
                                 'day_of_week': _selectedDay,
+                                'school_id': widget.userInfo!['school_id'],
                               };
                               
                               if (widget.schedule != null && widget.schedule!['id'] != null) {

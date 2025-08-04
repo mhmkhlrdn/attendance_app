@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'admin_students_screen.dart';
 import '../services/local_storage_service.dart';
-import '../services/offline_sync_service.dart';
+import 'admin_students_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -13,165 +12,292 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _nuptkController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+  final _nuptkController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _isLoading = false;
-  String? _errorMessage;
+  String? _selectedSchoolId;
+  List<Map<String, dynamic>> _schools = [];
+  bool _isLoadingSchools = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSchools();
+  }
+
+  Future<void> _loadSchools() async {
+    try {
+      final schoolsQuery = await FirebaseFirestore.instance.collection('schools').get();
+      final schools = schoolsQuery.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'name': data['name'] ?? 'Unknown School',
+          'address': data['address'] ?? '',
+        };
+      }).toList();
+      
+      setState(() {
+        _schools = schools;
+        _isLoadingSchools = false;
+      });
+    } catch (e) {
+      print('Error loading schools: $e');
+      setState(() => _isLoadingSchools = false);
+    }
+  }
 
   Future<void> _login() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedSchoolId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Silakan pilih sekolah terlebih dahulu')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
     try {
       final nuptk = _nuptkController.text.trim();
       final password = _passwordController.text.trim();
-      final query = await FirebaseFirestore.instance
+
+      // Query teacher by NUPTK and school_id
+      final teacherQuery = await FirebaseFirestore.instance
           .collection('teachers')
           .where('nuptk', isEqualTo: nuptk)
+          .where('school_id', isEqualTo: _selectedSchoolId)
           .limit(1)
           .get();
-      if (query.docs.isEmpty) {
-        setState(() {
-          _errorMessage = 'NUPTK tidak ditemukan.';
-        });
-      } else {
-        final teacher = query.docs.first.data();
-        if (teacher['password'] == password) {
-          final userInfo = <String, String>{
-            'name': (teacher['name'] ?? '').toString(),
-            'nuptk': (teacher['nuptk'] ?? '').toString(),
-            'role': (teacher['role'] ?? '').toString(),
-          };
-          
-          // Save user info locally
-          await LocalStorageService.saveUserInfo(userInfo);
-          
-          // Sync teacher data in background
-          OfflineSyncService.syncTeacherData(teacher['nuptk']?.toString() ?? '');
-          
-          // Redirect based on role
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => AdminStudentsScreen(
-                userInfo: userInfo,
-                role: teacher['role']?.toString() ?? 'guru',
-              ),
+
+      if (teacherQuery.docs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('NUPTK tidak ditemukan atau tidak terdaftar di sekolah ini'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final teacherData = teacherQuery.docs.first.data();
+      final storedPassword = teacherData['password'] ?? '';
+
+      if (password != storedPassword) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Password salah'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Save user info with school_id
+      final userInfo = <String, String>{
+        'nuptk': nuptk,
+        'name': teacherData['name'] ?? '',
+        'role': teacherData['role'] ?? 'guru',
+        'school_id': _selectedSchoolId!,
+        'school_name': _schools.firstWhere((s) => s['id'] == _selectedSchoolId)['name'],
+      };
+
+      await LocalStorageService.saveUserInfo(userInfo);
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => AdminStudentsScreen(
+              userInfo: userInfo,
+              role: userInfo['role']!,
             ),
-          );
-        } else {
-          setState(() {
-            _errorMessage = 'Kata sandi salah.';
-          });
-        }
+          ),
+        );
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Gagal login: $e';
-      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Icon(
-                  Icons.fingerprint,
-                  size: 80,
-                  color: Colors.teal,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Selamat Datang',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[800],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Masuk untuk melanjutkan ke aplikasi presensi',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 40),
-                Form(
-                  key: _formKey,
-                  child: Column(
-                    children: [
-                      TextFormField(
-                        controller: _nuptkController,
-                        decoration: InputDecoration(
-                          labelText: 'NUPTK',
-                          prefixIcon: const Icon(Icons.person_outline),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.teal.shade50,
+              Colors.teal.shade100,
+              Colors.teal.shade200,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Card(
+                elevation: 8,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Logo/Icon
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: Colors.teal.shade100,
+                            borderRadius: BorderRadius.circular(40),
+                          ),
+                          child: Icon(
+                            Icons.school,
+                            size: 40,
+                            color: Colors.teal.shade700,
+                          ),
                         ),
-                        validator: (value) => value == null || value.isEmpty ? 'Masukkan NUPTK' : null,
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _passwordController,
-                        decoration: InputDecoration(
-                          labelText: 'Kata Sandi',
-                          prefixIcon: const Icon(Icons.lock_outline),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        const SizedBox(height: 24),
+                        
+                        // Title
+                        const Text(
+                          'SIABSEN',
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.teal,
+                          ),
                         ),
-                        obscureText: true,
-                        validator: (value) => value == null || value.isEmpty ? 'Masukkan kata sandi' : null,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                if (_errorMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16.0),
-                    child: Text(
-                      _errorMessage!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.red),
+                        const Text(
+                          'Sistem Absensi Digital',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+
+                        // School Selection
+                        if (_isLoadingSchools)
+                          const CircularProgressIndicator()
+                        else
+                          DropdownButtonFormField<String>(
+                            value: _selectedSchoolId,
+                            decoration: const InputDecoration(
+                              labelText: 'Pilih Sekolah',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.school),
+                            ),
+                            items: _schools.map((school) {
+                              return DropdownMenuItem(
+                                value: school['id'] as String,
+                                child: Text(school['name'] as String),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedSchoolId = value;
+                              });
+                            },
+                            validator: (value) {
+                              if (value == null) {
+                                return 'Silakan pilih sekolah';
+                              }
+                              return null;
+                            },
+                          ),
+                        
+                        const SizedBox(height: 16),
+
+                        // NUPTK Field
+                        TextFormField(
+                          controller: _nuptkController,
+                          decoration: const InputDecoration(
+                            labelText: 'NUPTK',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.person),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'NUPTK tidak boleh kosong';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Password Field
+                        TextFormField(
+                          controller: _passwordController,
+                          decoration: const InputDecoration(
+                            labelText: 'Password',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.lock),
+                          ),
+                          obscureText: true,
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Password tidak boleh kosong';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 24),
+
+                        // Login Button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _login,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.teal,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: _isLoading
+                                ? const CircularProgressIndicator(color: Colors.white)
+                                : const Text(
+                                    'Masuk',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : ElevatedButton(
-                        onPressed: () {
-                          if (_formKey.currentState!.validate()) {
-                            _login();
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          backgroundColor: Colors.teal,
-                        ),
-                        child: const Text('Masuk'),
-                      ),
-              ],
+                ),
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _nuptkController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 }
 

@@ -97,7 +97,20 @@ class LocalStorageService {
   static Future<void> savePendingAttendance(Map<String, dynamic> attendanceData) async {
     final prefs = await SharedPreferences.getInstance();
     final pendingList = await getPendingAttendance();
-    pendingList.add(attendanceData);
+    
+    // Convert DateTime objects to strings for JSON serialization
+    final serializableData = Map<String, dynamic>.from(attendanceData);
+    if (serializableData['date'] is DateTime) {
+      serializableData['date'] = (serializableData['date'] as DateTime).toIso8601String();
+    }
+    if (serializableData['local_timestamp'] is DateTime) {
+      serializableData['local_timestamp'] = (serializableData['local_timestamp'] as DateTime).toIso8601String();
+    }
+    if (serializableData['created_at'] is DateTime) {
+      serializableData['created_at'] = (serializableData['created_at'] as DateTime).toIso8601String();
+    }
+    
+    pendingList.add(serializableData);
     await prefs.setString(_pendingAttendanceKey, jsonEncode(pendingList));
   }
 
@@ -108,7 +121,34 @@ class LocalStorageService {
     if (pendingString != null) {
       try {
         final pendingList = jsonDecode(pendingString) as List<dynamic>;
-        return pendingList.map((item) => Map<String, dynamic>.from(item)).toList();
+        return pendingList.map((item) {
+          final data = Map<String, dynamic>.from(item);
+          
+          // Convert date strings back to DateTime objects
+          if (data['date'] is String) {
+            try {
+              data['date'] = DateTime.parse(data['date'] as String);
+            } catch (e) {
+              print('Error parsing date string: ${data['date']}');
+            }
+          }
+          if (data['local_timestamp'] is String) {
+            try {
+              data['local_timestamp'] = DateTime.parse(data['local_timestamp'] as String);
+            } catch (e) {
+              print('Error parsing local_timestamp string: ${data['local_timestamp']}');
+            }
+          }
+          if (data['created_at'] is String) {
+            try {
+              data['created_at'] = DateTime.parse(data['created_at'] as String);
+            } catch (e) {
+              print('Error parsing created_at string: ${data['created_at']}');
+            }
+          }
+          
+          return data;
+        }).toList();
       } catch (e) {
         print('Error parsing pending attendance: $e');
         return [];
@@ -135,13 +175,42 @@ class LocalStorageService {
     final pendingList = await getPendingAttendance();
     
     // Remove the specific attendance record
-    pendingList.removeWhere((attendance) =>
-      attendance['schedule_id'] == scheduleId &&
-      attendance['teacher_id'] == teacherId &&
-      attendance['date'] == date
-    );
+    pendingList.removeWhere((attendance) {
+      final attendanceScheduleId = attendance['schedule_id'] as String?;
+      final attendanceTeacherId = attendance['teacher_id'] as String?;
+      final attendanceDate = attendance['date'];
+      
+      // Handle both DateTime and String date formats
+      String attendanceDateString;
+      if (attendanceDate is DateTime) {
+        attendanceDateString = attendanceDate.toIso8601String().split('T')[0]; // Get just the date part
+      } else if (attendanceDate is String) {
+        attendanceDateString = attendanceDate.split('T')[0]; // Get just the date part
+      } else {
+        return false;
+      }
+      
+      return attendanceScheduleId == scheduleId &&
+             attendanceTeacherId == teacherId &&
+             attendanceDateString == date.split('T')[0];
+    });
     
-    await prefs.setString(_pendingAttendanceKey, jsonEncode(pendingList));
+    // Convert DateTime objects back to strings before saving
+    final serializableList = pendingList.map((attendance) {
+      final data = Map<String, dynamic>.from(attendance);
+      if (data['date'] is DateTime) {
+        data['date'] = (data['date'] as DateTime).toIso8601String();
+      }
+      if (data['local_timestamp'] is DateTime) {
+        data['local_timestamp'] = (data['local_timestamp'] as DateTime).toIso8601String();
+      }
+      if (data['created_at'] is DateTime) {
+        data['created_at'] = (data['created_at'] as DateTime).toIso8601String();
+      }
+      return data;
+    }).toList();
+    
+    await prefs.setString(_pendingAttendanceKey, jsonEncode(serializableList));
   }
 
   /// Save last sync timestamp

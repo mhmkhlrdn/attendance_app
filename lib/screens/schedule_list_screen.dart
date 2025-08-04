@@ -161,6 +161,8 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
     Query query = FirebaseFirestore.instance.collection('schedules');
     if (widget.role == 'guru') {
       query = query.where('teacher_id', isEqualTo: widget.userInfo['nuptk']);
+    } else if (widget.role == 'admin') {
+      query = query.where('school_id', isEqualTo: widget.userInfo['school_id']);
     }
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -302,10 +304,13 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
                                 await Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => CreateScheduleScreen(schedule: {
-                                      'id': scheduleDoc.id,
-                                      ...data,
-                                    }),
+                                    builder: (context) => CreateScheduleScreen(
+                                      schedule: {
+                                        'id': scheduleDoc.id,
+                                        ...data,
+                                      },
+                                      userInfo: widget.userInfo,
+                                    ),
                                   ),
                                 );
                               },
@@ -355,7 +360,7 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const CreateScheduleScreen(),
+                        builder: (context) => CreateScheduleScreen(userInfo: widget.userInfo),
                       ),
                     );
                   },
