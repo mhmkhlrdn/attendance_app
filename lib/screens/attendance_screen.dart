@@ -674,14 +674,37 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         // Offline: Check pending attendance to avoid duplicates
         final pendingAttendance = await LocalStorageService.getPendingAttendance();
         final today = DateTime(now.year, now.month, now.day);
-        final todayString = today.toIso8601String();
         
         // Check if we already have pending attendance for today
-        final hasPendingToday = pendingAttendance.any((pending) =>
-          pending['schedule_id'] == scheduleId &&
-          pending['teacher_id'] == userInfo['nuptk'] &&
-          pending['date'] == todayString
-        );
+        final hasPendingToday = pendingAttendance.any((pending) {
+          final pendingScheduleId = pending['schedule_id'] as String?;
+          final pendingTeacherId = pending['teacher_id'] as String?;
+          final pendingDate = pending['date'];
+          
+          if (pendingScheduleId != scheduleId || pendingTeacherId != userInfo['nuptk']) {
+            return false;
+          }
+          
+          // Handle both DateTime and String date formats
+          DateTime? pendingDateTime;
+          if (pendingDate is DateTime) {
+            pendingDateTime = pendingDate;
+          } else if (pendingDate is String) {
+            try {
+              pendingDateTime = DateTime.parse(pendingDate);
+            } catch (e) {
+              print('Error parsing pending date: $e');
+              return false;
+            }
+          } else {
+            return false;
+          }
+          
+          // Compare dates (ignore time)
+          return pendingDateTime.year == today.year &&
+                 pendingDateTime.month == today.month &&
+                 pendingDateTime.day == today.day;
+        });
 
         if (hasPendingToday) {
           if (mounted) {

@@ -14,6 +14,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   List<Map<String, dynamic>> _pendingAttendance = [];
   bool _isOnline = true;
   bool _isLoading = false;
+  bool _isSyncing = false; // New flag to prevent multiple sync operations
   Map<String, dynamic> _syncStatus = {};
 
   @override
@@ -67,22 +68,26 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   }
 
   Future<void> _loadPendingData() async {
+    if (_isLoading) return; // Prevent multiple simultaneous loads
+    
     setState(() {
       _isLoading = true;
     });
 
     try {
       final pendingData = await LocalStorageService.getPendingAttendance();
-      setState(() {
-        _pendingAttendance = pendingData;
-        _isLoading = false;
-      });
-      _loadSyncStatus();
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
       if (mounted) {
+        setState(() {
+          _pendingAttendance = pendingData;
+          _isLoading = false;
+        });
+        await _loadSyncStatus(); // Refresh sync status after loading pending data
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading pending data: $e')),
         );
@@ -91,23 +96,31 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   }
 
   Future<void> _syncNow() async {
-    if (!_isOnline) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tidak ada koneksi internet. Sinkronisasi akan dilakukan saat online.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+    // Prevent multiple sync operations
+    if (_isSyncing || !_isOnline) {
+      if (!_isOnline) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tidak ada koneksi internet. Sinkronisasi akan dilakukan saat online.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       return;
     }
 
     setState(() {
+      _isSyncing = true;
       _isLoading = true;
     });
 
     try {
       final initialCount = _pendingAttendance.length;
+      
+      // Perform the sync operation
       await OfflineSyncService.syncPendingAttendance();
+      
+      // Reload pending data to get updated state
       await _loadPendingData();
       
       final finalCount = _pendingAttendance.length;
@@ -147,9 +160,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         );
       }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -170,7 +186,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadPendingData,
+            onPressed: _isLoading ? null : _loadPendingData,
           ),
         ],
       ),
@@ -252,9 +268,18 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
-                              onPressed: _isOnline ? _syncNow : null,
-                              icon: const Icon(Icons.sync),
-                              label: const Text('Sinkronisasi Sekarang'),
+                              onPressed: (_isOnline && !_isSyncing) ? _syncNow : null,
+                              icon: _isSyncing 
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  )
+                                : const Icon(Icons.sync),
+                              label: Text(_isSyncing ? 'Menyinkronkan...' : 'Sinkronisasi Sekarang'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.teal,
                                 foregroundColor: Colors.white,
@@ -315,6 +340,16 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
+                        if (_isSyncing) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Status: Sedang menyinkronkan...',
+                            style: TextStyle(
+                              color: Colors.orange[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

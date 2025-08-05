@@ -5,23 +5,39 @@ import '../services/connectivity_service.dart';
 class OfflineSyncService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static final ConnectivityService _connectivityService = ConnectivityService();
+  static bool _isSyncing = false; // Prevent multiple simultaneous sync operations
 
   /// Sync pending attendance data when online
   static Future<void> syncPendingAttendance() async {
-    if (!_connectivityService.isConnected) return;
+    // Prevent multiple simultaneous sync operations
+    if (_isSyncing) {
+      print('Sync already in progress, skipping...');
+      return;
+    }
+
+    if (!_connectivityService.isConnected) {
+      print('No internet connection, skipping sync...');
+      return;
+    }
+
+    _isSyncing = true;
 
     try {
       final pendingAttendance = await LocalStorageService.getPendingAttendance();
-      if (pendingAttendance.isEmpty) return;
+      if (pendingAttendance.isEmpty) {
+        print('No pending attendance to sync');
+        return;
+      }
 
       print('Syncing ${pendingAttendance.length} pending attendance records...');
 
+      // Process each attendance record
       for (var attendanceData in pendingAttendance) {
         try {
           // Check if attendance already exists to prevent duplicates
           final existingAttendance = await _checkExistingAttendance(attendanceData);
           if (existingAttendance) {
-            print('Attendance already exists for class: ${attendanceData['class_id']}, date: ${attendanceData['date']}. Skipping...');
+            print('Attendance already exists for class: ${attendanceData['class_id']}, date: ${attendanceData['date']}. Removing from pending...');
             // Remove this pending record since it already exists
             await LocalStorageService.removePendingAttendance(
               attendanceData['schedule_id'] as String,
@@ -31,16 +47,22 @@ class OfflineSyncService {
             continue;
           }
 
+          // Create a clean copy of the data for Firestore
+          final cleanData = Map<String, dynamic>.from(attendanceData);
+          
           // Remove the local timestamp and add server timestamp
-          attendanceData.remove('local_timestamp');
+          cleanData.remove('local_timestamp');
           
           // Convert date string back to DateTime for Firestore
-          if (attendanceData['date'] is String) {
-            attendanceData['date'] = DateTime.parse(attendanceData['date'] as String);
+          if (cleanData['date'] is String) {
+            cleanData['date'] = DateTime.parse(cleanData['date'] as String);
           }
           
-          await _firestore.collection('attendances').add(attendanceData);
-          print('Synced attendance for class: ${attendanceData['class_id']}');
+          // Add server timestamp
+          cleanData['server_timestamp'] = FieldValue.serverTimestamp();
+          
+          await _firestore.collection('attendances').add(cleanData);
+          print('Successfully synced attendance for class: ${attendanceData['class_id']}');
           
           // Remove this specific pending record after successful sync
           await LocalStorageService.removePendingAttendance(
@@ -49,15 +71,19 @@ class OfflineSyncService {
             attendanceData['date'] as String,
           );
         } catch (e) {
-          print('Error syncing attendance: $e');
+          print('Error syncing individual attendance: $e');
           // Continue with other records even if one fails
+          // Don't remove the pending record if sync failed
         }
       }
 
       await LocalStorageService.saveLastSync(DateTime.now());
-      print('Successfully synced all pending attendance records');
+      print('Successfully completed sync operation');
     } catch (e) {
       print('Error during sync: $e');
+      rethrow; // Re-throw to let the UI handle the error
+    } finally {
+      _isSyncing = false;
     }
   }
 
@@ -67,14 +93,24 @@ class OfflineSyncService {
       final classId = attendanceData['class_id'] as String?;
       final scheduleId = attendanceData['schedule_id'] as String?;
       final teacherId = attendanceData['teacher_id'] as String?;
-      final dateString = attendanceData['date'] as String?;
+      final dateValue = attendanceData['date'];
       
-      if (classId == null || scheduleId == null || teacherId == null || dateString == null) {
+      if (classId == null || scheduleId == null || teacherId == null || dateValue == null) {
+        print('Missing required fields for duplicate check');
         return false;
       }
 
-      // Parse the date string to get the date range for query
-      final date = DateTime.parse(dateString);
+      // Handle both DateTime and String date formats
+      DateTime date;
+      if (dateValue is DateTime) {
+        date = dateValue;
+      } else if (dateValue is String) {
+        date = DateTime.parse(dateValue);
+      } else {
+        print('Invalid date format for duplicate check');
+        return false;
+      }
+
       final startOfDay = DateTime(date.year, date.month, date.day);
       final endOfDay = startOfDay.add(const Duration(days: 1));
 
@@ -89,7 +125,12 @@ class OfflineSyncService {
           .limit(1)
           .get();
 
-      return query.docs.isNotEmpty;
+      final exists = query.docs.isNotEmpty;
+      if (exists) {
+        print('Duplicate found: class=$classId, schedule=$scheduleId, teacher=$teacherId, date=$date');
+      }
+      
+      return exists;
     } catch (e) {
       print('Error checking existing attendance: $e');
       return false;
@@ -117,6 +158,9 @@ class OfflineSyncService {
       return false;
     }
   }
+
+  /// Check if sync is currently in progress
+  static bool get isSyncing => _isSyncing;
 
   /// Sync teacher data (classes and schedules)
   static Future<void> syncTeacherData(String teacherId) async {
@@ -183,6 +227,29 @@ class OfflineSyncService {
       'lastSync': lastSync,
       'isConnected': isConnected,
       'hasPendingData': pendingCount > 0,
+      'isSyncing': _isSyncing,
+      'canSync': isConnected && !_isSyncing && pendingCount > 0,
+    };
+  }
+
+  /// Get detailed sync information for debugging
+  static Future<Map<String, dynamic>> getDetailedSyncInfo() async {
+    final pendingAttendance = await LocalStorageService.getPendingAttendance();
+    final lastSync = await LocalStorageService.getLastSync();
+    final isConnected = _connectivityService.isConnected;
+    
+    return {
+      'pendingCount': pendingAttendance.length,
+      'lastSync': lastSync,
+      'isConnected': isConnected,
+      'isSyncing': _isSyncing,
+      'pendingDetails': pendingAttendance.map((attendance) => {
+        'class_id': attendance['class_id'],
+        'schedule_id': attendance['schedule_id'],
+        'teacher_id': attendance['teacher_id'],
+        'date': attendance['date'],
+        'student_count': (attendance['student_ids'] as List<dynamic>?)?.length ?? 0,
+      }).toList(),
     };
   }
 

@@ -69,8 +69,17 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Kelas berhasil diperbarui!')),
+            const SnackBar(
+              content: Text('Kelas berhasil diperbarui!'),
+              backgroundColor: Colors.green,
+            ),
           );
+          // Navigate back after a short delay
+          Future.delayed(const Duration(seconds: 1), () {
+            if (mounted) {
+              Navigator.pop(context);
+            }
+          });
         }
       } else {
         // Create mode
@@ -80,8 +89,17 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Kelas berhasil dibuat!')),
+            const SnackBar(
+              content: Text('Kelas berhasil dibuat!'),
+              backgroundColor: Colors.green,
+            ),
           );
+          // Navigate back after a short delay
+          Future.delayed(const Duration(seconds: 1), () {
+            if (mounted) {
+              Navigator.pop(context);
+            }
+          });
         }
       }
     } catch (e) {

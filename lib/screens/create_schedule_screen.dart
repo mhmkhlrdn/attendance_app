@@ -479,6 +479,20 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                                   _isSaving = false;
                                   _message = 'Jadwal berhasil diperbarui!';
                                 });
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Jadwal berhasil diperbarui!'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                  // Navigate back after a short delay
+                                  Future.delayed(const Duration(seconds: 1), () {
+                                    if (mounted) {
+                                      Navigator.pop(context);
+                                    }
+                                  });
+                                }
                               } else {
                                 // Create mode
                                 await FirebaseFirestore.instance.collection('schedules').add(scheduleData);
@@ -486,6 +500,20 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                                   _isSaving = false;
                                   _message = 'Jadwal berhasil dibuat!';
                                 });
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Jadwal berhasil dibuat!'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                  // Navigate back after a short delay
+                                  Future.delayed(const Duration(seconds: 1), () {
+                                    if (mounted) {
+                                      Navigator.pop(context);
+                                    }
+                                  });
+                                }
                               }
                             } catch (e) {
                               setState(() {

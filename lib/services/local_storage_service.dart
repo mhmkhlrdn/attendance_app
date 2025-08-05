@@ -98,6 +98,47 @@ class LocalStorageService {
     final prefs = await SharedPreferences.getInstance();
     final pendingList = await getPendingAttendance();
     
+    // Check for duplicates before adding
+    final isDuplicate = pendingList.any((existing) {
+      final existingScheduleId = existing['schedule_id'] as String?;
+      final existingTeacherId = existing['teacher_id'] as String?;
+      final existingDate = existing['date'];
+      final newScheduleId = attendanceData['schedule_id'] as String?;
+      final newTeacherId = attendanceData['teacher_id'] as String?;
+      final newDate = attendanceData['date'];
+      
+      if (existingScheduleId != newScheduleId || existingTeacherId != newTeacherId) {
+        return false;
+      }
+      
+      // Compare dates
+      String existingDateString;
+      String newDateString;
+      
+      if (existingDate is DateTime) {
+        existingDateString = existingDate.toIso8601String().split('T')[0];
+      } else if (existingDate is String) {
+        existingDateString = existingDate.split('T')[0];
+      } else {
+        return false;
+      }
+      
+      if (newDate is DateTime) {
+        newDateString = newDate.toIso8601String().split('T')[0];
+      } else if (newDate is String) {
+        newDateString = newDate.split('T')[0];
+      } else {
+        return false;
+      }
+      
+      return existingDateString == newDateString;
+    });
+    
+    if (isDuplicate) {
+      print('Duplicate pending attendance detected, skipping save');
+      return;
+    }
+    
     // Convert DateTime objects to strings for JSON serialization
     final serializableData = Map<String, dynamic>.from(attendanceData);
     if (serializableData['date'] is DateTime) {
@@ -112,6 +153,7 @@ class LocalStorageService {
     
     pendingList.add(serializableData);
     await prefs.setString(_pendingAttendanceKey, jsonEncode(pendingList));
+    print('Saved pending attendance: ${attendanceData['class_id']} - ${attendanceData['date']}');
   }
 
   /// Get pending attendance data
@@ -130,6 +172,7 @@ class LocalStorageService {
               data['date'] = DateTime.parse(data['date'] as String);
             } catch (e) {
               print('Error parsing date string: ${data['date']}');
+              // Keep as string if parsing fails
             }
           }
           if (data['local_timestamp'] is String) {
@@ -137,6 +180,7 @@ class LocalStorageService {
               data['local_timestamp'] = DateTime.parse(data['local_timestamp'] as String);
             } catch (e) {
               print('Error parsing local_timestamp string: ${data['local_timestamp']}');
+              // Keep as string if parsing fails
             }
           }
           if (data['created_at'] is String) {
@@ -144,6 +188,7 @@ class LocalStorageService {
               data['created_at'] = DateTime.parse(data['created_at'] as String);
             } catch (e) {
               print('Error parsing created_at string: ${data['created_at']}');
+              // Keep as string if parsing fails
             }
           }
           
@@ -151,6 +196,8 @@ class LocalStorageService {
         }).toList();
       } catch (e) {
         print('Error parsing pending attendance: $e');
+        // If parsing fails, clear the corrupted data
+        await prefs.remove(_pendingAttendanceKey);
         return [];
       }
     }
@@ -167,6 +214,7 @@ class LocalStorageService {
   static Future<void> clearPendingAttendance() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pendingAttendanceKey);
+    print('Cleared all pending attendance data');
   }
 
   /// Remove specific pending attendance record
@@ -174,11 +222,17 @@ class LocalStorageService {
     final prefs = await SharedPreferences.getInstance();
     final pendingList = await getPendingAttendance();
     
+    final initialCount = pendingList.length;
+    
     // Remove the specific attendance record
     pendingList.removeWhere((attendance) {
       final attendanceScheduleId = attendance['schedule_id'] as String?;
       final attendanceTeacherId = attendance['teacher_id'] as String?;
       final attendanceDate = attendance['date'];
+      
+      if (attendanceScheduleId != scheduleId || attendanceTeacherId != teacherId) {
+        return false;
+      }
       
       // Handle both DateTime and String date formats
       String attendanceDateString;
@@ -190,10 +244,14 @@ class LocalStorageService {
         return false;
       }
       
-      return attendanceScheduleId == scheduleId &&
-             attendanceTeacherId == teacherId &&
-             attendanceDateString == date.split('T')[0];
+      final targetDateString = date.split('T')[0];
+      return attendanceDateString == targetDateString;
     });
+    
+    final finalCount = pendingList.length;
+    if (initialCount != finalCount) {
+      print('Removed ${initialCount - finalCount} pending attendance record(s)');
+    }
     
     // Convert DateTime objects back to strings before saving
     final serializableList = pendingList.map((attendance) {

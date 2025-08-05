@@ -142,9 +142,18 @@ class _CreateTeacherScreenState extends State<CreateTeacherScreen> {
                             });
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Guru berhasil diperbarui!')),
+                                const SnackBar(
+                                  content: Text('Guru berhasil diperbarui!'),
+                                  backgroundColor: Colors.green,
+                                ),
                               );
                               setState(() => _message = null);
+                              // Navigate back after a short delay
+                              Future.delayed(const Duration(seconds: 1), () {
+                                if (mounted) {
+                                  Navigator.pop(context);
+                                }
+                              });
                             }
                           } else {
                             // Create mode
@@ -155,9 +164,18 @@ class _CreateTeacherScreenState extends State<CreateTeacherScreen> {
                             });
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Guru berhasil ditambahkan!')),
+                                const SnackBar(
+                                  content: Text('Guru berhasil ditambahkan!'),
+                                  backgroundColor: Colors.green,
+                                ),
                               );
                               setState(() => _message = null);
+                              // Navigate back after a short delay
+                              Future.delayed(const Duration(seconds: 1), () {
+                                if (mounted) {
+                                  Navigator.pop(context);
+                                }
+                              });
                             }
                           }
                         } catch (e) {
