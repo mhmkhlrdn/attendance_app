@@ -32,26 +32,29 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
   Future<void> _createClass() async {
     setState(() => _isLoading = true);
     try {
-      // Duplicate check: grade + class_name + year_id
-      final existing = await FirebaseFirestore.instance
-        .collection('classes')
-        .where('grade', isEqualTo: _gradeController.text.trim())
-        .where('class_name', isEqualTo: _classNameController.text.trim())
-        .where('year_id', isEqualTo: _selectedYearId)
-        .get();
-      if (existing.docs.isNotEmpty && (widget.classData == null || widget.classData!['id'] != existing.docs.first.id)) {
-        setState(() {
-          _isLoading = false;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Kelas dengan tingkat, nama, dan tahun ini sudah ada!'), backgroundColor: Colors.red),
-          );
+      // Duplicate check: grade + class_name + year_id (only if class_name is provided)
+      final className = _classNameController.text.trim();
+      if (className.isNotEmpty) {
+        final existing = await FirebaseFirestore.instance
+          .collection('classes')
+          .where('grade', isEqualTo: _gradeController.text.trim())
+          .where('class_name', isEqualTo: className)
+          .where('year_id', isEqualTo: _selectedYearId)
+          .get();
+        if (existing.docs.isNotEmpty && (widget.classData == null || widget.classData!['id'] != existing.docs.first.id)) {
+          setState(() {
+            _isLoading = false;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Kelas dengan tingkat, nama, dan tahun ini sudah ada!'), backgroundColor: Colors.red),
+            );
+          }
+          return;
         }
-        return;
       }
       final classData = {
-        'class_name': _classNameController.text.trim(),
+        'class_name': _classNameController.text.trim().isEmpty ? ' ' : _classNameController.text.trim(),
         'grade': _gradeController.text.trim(),
         'year_id': _selectedYearId,
         'students': widget.classData?['students'] ?? [], // Keep existing students if editing
@@ -136,7 +139,7 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
                   TextFormField(
                     controller: _gradeController,
                     decoration: InputDecoration(
-                      labelText: 'Tingkat (contoh: 10) *',
+                      labelText: 'Tingkat (contoh: 4) *',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       prefixIcon: const Icon(Icons.school_outlined),
                     ),
@@ -146,11 +149,10 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
                   TextFormField(
                     controller: _classNameController,
                     decoration: InputDecoration(
-                      labelText: 'Nama Kelas (contoh: A) *',
+                      labelText: 'Nama Kelas (contoh: A)',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       prefixIcon: const Icon(Icons.class_outlined),
                     ),
-                    validator: (value) => value == null || value.isEmpty ? 'Masukkan nama kelas' : null,
                   ),
                   const SizedBox(height: 16),
                   StreamBuilder<QuerySnapshot>(

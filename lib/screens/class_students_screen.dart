@@ -41,7 +41,7 @@ class ClassStudentsScreen extends StatelessWidget {
           final allStudents = snapshot.data!.docs;
           final currentStudents = <QueryDocumentSnapshot>[];
           
-          for (var studentDoc in allStudents) {
+                    for (var studentDoc in allStudents) {
             final studentData = studentDoc.data() as Map<String, dynamic>;
             final currentEnrollment = StudentHelperService.getCurrentEnrollment(studentData);
             
@@ -50,8 +50,15 @@ class ClassStudentsScreen extends StatelessWidget {
               final currentClass = currentEnrollment['class']?.toString() ?? '';
               final currentYear = currentEnrollment['year_id']?.toString() ?? '';
               
+              // Normalize class names for comparison (handle empty class names)
+              final normalizedCurrentClass = currentClass.trim();
+              final normalizedClassName = className.trim();
+              
               // Check if this student's current enrollment matches this class
-              if (currentGrade == grade && currentClass == className && currentYear == year) {
+              if (currentGrade == grade && 
+                  (normalizedCurrentClass == normalizedClassName || 
+                   (normalizedCurrentClass.isEmpty && normalizedClassName.isEmpty)) &&
+                  currentYear == year) {
                 currentStudents.add(studentDoc);
               }
             }
@@ -67,7 +74,7 @@ class ClassStudentsScreen extends StatelessWidget {
               final data = currentStudents[index].data() as Map<String, dynamic>;
               return ListTile(
                 title: Text(data['name'] ?? ''),
-                subtitle: Text('Gender: ${data['gender'] ?? '-'} | Phone: ${data['parent_phone'] ?? '-'}'),
+                subtitle: Text('Jenis Kelamin: ${data['gender'] ?? '-'} | No. Hp Orang Tua: ${data['parent_phone'] ?? '-'}'),
               );
             },
           );

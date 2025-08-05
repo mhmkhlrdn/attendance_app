@@ -22,6 +22,10 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   String? _selectedClassId;
   List<Map<String, dynamic>> _availableClasses = [];
   bool _isLoadingClasses = false;
+  
+  // Attendance type filtering (admin only)
+  String? _selectedAttendanceType; // 'morning', 'subject', or null for all
+  Map<String, String> _teacherNames = {}; // teacherId -> teacherName
 
   @override
   void initState() {
@@ -98,6 +102,41 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           if (_selectedClassId != null && classId != _selectedClassId) {
             print('✗ Record ${doc.id}: class_id mismatch (${classId} vs ${_selectedClassId})');
             continue;
+          }
+          
+          // Check attendance type filter
+          if (_selectedAttendanceType != null) {
+            final scheduleId = data['schedule_id'] as String?;
+            if (scheduleId != null) {
+              try {
+                final scheduleDoc = await FirebaseFirestore.instance
+                    .collection('schedules')
+                    .doc(scheduleId)
+                    .get();
+                
+                if (scheduleDoc.exists) {
+                  final scheduleData = scheduleDoc.data() as Map<String, dynamic>;
+                  final scheduleType = scheduleData['schedule_type'] as String? ?? 'subject_specific';
+                  
+                  if (_selectedAttendanceType == 'morning' && scheduleType != 'daily_morning') {
+                    print('✗ Record ${doc.id}: not morning attendance (${scheduleType})');
+                    continue;
+                  } else if (_selectedAttendanceType == 'subject' && scheduleType != 'subject_specific') {
+                    print('✗ Record ${doc.id}: not subject attendance (${scheduleType})');
+                    continue;
+                  }
+                } else {
+                  print('✗ Record ${doc.id}: schedule not found (${scheduleId})');
+                  continue;
+                }
+              } catch (e) {
+                print('✗ Record ${doc.id}: error checking schedule type: $e');
+                continue;
+              }
+            } else {
+              print('✗ Record ${doc.id}: no schedule_id found');
+              continue;
+            }
           }
           
           if (schoolId != null) {
@@ -256,11 +295,42 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       
       print('Loaded ${studentNames.length} student names');
 
+      // Load all teacher names
+      print('\n--- Loading teacher names ---');
+      final teacherNames = <String, String>{};
+      final allTeacherIds = <String>{};
+      
+      for (var monthData in monthlyGroups.values) {
+        for (var attendance in monthData) {
+          final data = attendance['data'] as Map<String, dynamic>;
+          final teacherId = data['teacher_id'] as String?;
+          if (teacherId != null) {
+            allTeacherIds.add(teacherId);
+          }
+        }
+      }
+      
+      print('Found ${allTeacherIds.length} unique teacher IDs: ${allTeacherIds.toList()}');
+      
+      // Load all teacher names in parallel
+      final teacherNameFutures = allTeacherIds.map((teacherId) async {
+        final name = await _loadTeacherName(teacherId);
+        return MapEntry(teacherId, name);
+      });
+      
+      final teacherNameResults = await Future.wait(teacherNameFutures);
+      for (var entry in teacherNameResults) {
+        teacherNames[entry.key] = entry.value;
+      }
+      
+      print('Loaded ${teacherNames.length} teacher names');
+
       setState(() {
         _monthlyData = monthlyGroups;
         _availableMonths = months;
         _selectedMonth = months.isNotEmpty ? months.first : '';
         _studentNames = studentNames;
+        _teacherNames = teacherNames;
         _isLoading = false;
       });
       
@@ -383,6 +453,45 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
             ),
           ),
         
+        // Attendance type filter (admin only)
+        if (widget.role == 'admin')
+          Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Text('Jenis Presensi: ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButton<String?>(
+                    value: _selectedAttendanceType,
+                    isExpanded: true,
+                    hint: const Text('Semua Jenis'),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Semua Jenis'),
+                      ),
+                      const DropdownMenuItem<String>(
+                        value: 'morning',
+                        child: Text('Presensi Pagi'),
+                      ),
+                      const DropdownMenuItem<String>(
+                        value: 'subject',
+                        child: Text('Presensi Mata Pelajaran'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedAttendanceType = value;
+                      });
+                      _loadAttendanceData(); // Reload data with new filter
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        
         // Month selector
         Container(
           padding: const EdgeInsets.all(16),
@@ -412,15 +521,80 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           ),
         ),
         
+        // Legend (admin only) - only show when subject filter is not applied
+        if (widget.role == 'admin' && _selectedAttendanceType != 'subject')
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                const Text('Keterangan: ', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Pagi',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Text('= Presensi Pagi', style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Mata Pelajaran',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Text('= Presensi Mata Pelajaran', style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        
         // Timetable
         Expanded(
-          child: _buildTimetable(),
+          child: FutureBuilder<Widget>(
+            future: _buildTimetable(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              return snapshot.data ?? const Center(child: Text('Tidak ada data untuk bulan ini.'));
+            },
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildTimetable() {
+  Future<Widget> _buildTimetable() async {
     print('\n=== BUILDING TIMETABLE ===');
     print('Selected month: $_selectedMonth');
     print('Monthly data keys: ${_monthlyData.keys.toList()}');
@@ -436,6 +610,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     // Get all unique dates in this month
     final dates = <DateTime>[];
     final dateAttendanceMap = <DateTime, Map<String, dynamic>>{};
+    final dateTeacherMap = <DateTime, String>{}; // date -> teacher name
+    final dateTypeMap = <DateTime, String>{}; // date -> attendance type
     
     print('\n--- Processing dates ---');
     for (var attendance in monthData) {
@@ -446,6 +622,37 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
         print('  Added date: $dayStart');
       }
       dateAttendanceMap[dayStart] = attendance;
+      
+      // Get teacher name for this attendance
+      final data = attendance['data'] as Map<String, dynamic>;
+      final teacherId = data['teacher_id'] as String?;
+      if (teacherId != null) {
+        final teacherName = _teacherNames[teacherId] ?? 'Unknown';
+        dateTeacherMap[dayStart] = teacherName;
+        print('  Teacher for ${dayStart}: $teacherName');
+      }
+      
+      // Get attendance type for this attendance
+      final scheduleId = data['schedule_id'] as String?;
+      if (scheduleId != null) {
+        try {
+          final scheduleDoc = await FirebaseFirestore.instance
+              .collection('schedules')
+              .doc(scheduleId)
+              .get();
+          
+          if (scheduleDoc.exists) {
+            final scheduleData = scheduleDoc.data() as Map<String, dynamic>;
+            final scheduleType = scheduleData['schedule_type'] as String? ?? 'subject_specific';
+            final attendanceType = scheduleType == 'daily_morning' ? 'Pagi' : 'Mata Pelajaran';
+            dateTypeMap[dayStart] = attendanceType;
+            print('  Attendance type for ${dayStart}: $attendanceType');
+          }
+        } catch (e) {
+          print('  Error getting attendance type for ${dayStart}: $e');
+          dateTypeMap[dayStart] = 'Unknown';
+        }
+      }
     }
     
     dates.sort();
@@ -501,10 +708,44 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
             ),
             ...dates.map((date) => DataColumn(
               label: Expanded(
-                child: Text(
-                  '${date.day}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${date.day}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (widget.role == 'admin' && dateTeacherMap.containsKey(date))
+                      Text(
+                        dateTeacherMap[date]!,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.normal,
+                          color: Colors.grey,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    if (widget.role == 'admin' && dateTypeMap.containsKey(date))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: dateTypeMap[date] == 'Pagi' ? Colors.blue.shade100 : Colors.green.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          dateTypeMap[date]!,
+                          style: TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                            color: dateTypeMap[date] == 'Pagi' ? Colors.blue.shade800 : Colors.green.shade800,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             )).toList(),
@@ -678,21 +919,31 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   }
 
   Future<String> _loadStudentName(String studentId) async {
-    print('Loading student name for ID: $studentId');
     try {
       final doc = await FirebaseFirestore.instance.collection('students').doc(studentId).get();
       if (doc.exists) {
         final data = doc.data() as Map<String, dynamic>;
-        final name = data['name'] ?? 'Unknown';
-        print('  Found student: $name');
-        return name;
-      } else {
-        print('  Student document not found: $studentId');
+        return data['name'] as String? ?? 'Unknown';
       }
     } catch (e) {
-      print('  Error loading student name: $e');
+      print('Error loading student name for $studentId: $e');
     }
-    print('  Returning: Unknown');
+    return 'Unknown';
+  }
+
+  Future<String> _loadTeacherName(String teacherId) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('teachers')
+          .where('nuptk', isEqualTo: teacherId)
+          .get();
+      if (doc.docs.isNotEmpty) {
+        final data = doc.docs.first.data();
+        return data['name'] as String? ?? 'Unknown';
+      }
+    } catch (e) {
+      print('Error loading teacher name for $teacherId: $e');
+    }
     return 'Unknown';
   }
 

@@ -185,7 +185,7 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                 if (widget.role == 'admin')
                   ListTile(
                     leading: const Icon(Icons.upgrade, color: Colors.green),
-                    title: const Text('Promosi Siswa'),
+                    title: const Text('Naik Kelas'),
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.push(
@@ -242,19 +242,7 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                     );
                   },
                 ),
-                ListTile(
-                  leading: const Icon(Icons.storage, color: Colors.purple),
-                  title: const Text('Migrasi Data'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const DataMigrationScreen(),
-                      ),
-                    );
-                  },
-                ),
+
                 ListTile(
                   leading: const Icon(Icons.logout, color: Colors.blueGrey),
                   title: const Text('Keluar'),

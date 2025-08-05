@@ -174,7 +174,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         
                         // Title
                         const Text(
-                          'SIABSEN',
+                          'SADESA',
                           style: TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.bold,
@@ -182,10 +182,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const Text(
-                          'Sistem Absensi Digital',
+                          'Sistem Absensi Digital Siswa Tanjungkarang',
+                          textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 16,
                             color: Colors.grey,
+
                           ),
                         ),
                         const SizedBox(height: 32),

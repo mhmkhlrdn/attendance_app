@@ -263,7 +263,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   ],
                                 ).createShader(bounds),
                                 child: Text(
-                                  'SIABSEN',
+                                  'SADESA',
                                   style: TextStyle(
                                     fontSize: 32,
                                     fontWeight: FontWeight.bold,
@@ -276,7 +276,7 @@ class _SplashScreenState extends State<SplashScreen>
                               
                               // App Tagline
                               Text(
-                                'Sistem Absensi Digital',
+                                'Sistem Absensi Digital Siswa Tanjungkarang',
                                 style: TextStyle(
                                   fontSize: 16,
                                   color: Colors.teal.shade600,
@@ -373,7 +373,7 @@ class _SplashScreenState extends State<SplashScreen>
                           // Copyright text
                           const SizedBox(height: 30),
                           Text(
-                            'KKN LP3I Tasik 2025.',
+                            'KKN LP3I Tasik 2025',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.teal.shade500,

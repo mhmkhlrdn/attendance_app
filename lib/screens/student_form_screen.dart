@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class StudentFormScreen extends StatefulWidget {
-  final Map<String, dynamic>? student; // Pass null for add, or student data for edit
+  final Map<String, dynamic>?
+      student; // Pass null for add, or student data for edit
   final Map<String, String>? userInfo; // For school_id
 
-  const StudentFormScreen({Key? key, this.student, this.userInfo}) : super(key: key);
+  const StudentFormScreen({Key? key, this.student, this.userInfo})
+      : super(key: key);
 
   @override
   State<StudentFormScreen> createState() => _StudentFormScreenState();
@@ -20,21 +22,38 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   late TextEditingController _parentPhoneController;
   bool _isSaving = false;
   String? _message;
-
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: widget.student?['name'] ?? '');
-    _classController = TextEditingController(
-      text: widget.student != null && widget.student?['enrollments'] != null && (widget.student!['enrollments'] as List).isNotEmpty
-        ? '${(widget.student!['enrollments'] as List).first['grade']}${(widget.student!['enrollments'] as List).first['class']}'
-        : '',
-    );
-    _selectedYearId = widget.student != null && widget.student?['enrollments'] != null && (widget.student!['enrollments'] as List).isNotEmpty
+    _nameController =
+        TextEditingController(text: widget.student?['name'] ?? '');
+
+    // Fix class text construction to handle empty class names
+    String classText = '';
+    if (widget.student != null &&
+        widget.student?['enrollments'] != null &&
+        (widget.student!['enrollments'] as List).isNotEmpty) {
+      final enrollment = (widget.student!['enrollments'] as List).first;
+      final grade = enrollment['grade'] ?? '';
+      final className = enrollment['class'] ?? '';
+
+      // Handle empty class name (stored as space)
+      if (className.trim() == '' || className == ' ') {
+        classText = grade; // Just show the grade
+      } else {
+        classText = '$grade$className';
+      }
+    }
+    _classController = TextEditingController(text: classText);
+
+    _selectedYearId = widget.student != null &&
+            widget.student?['enrollments'] != null &&
+            (widget.student!['enrollments'] as List).isNotEmpty
         ? (widget.student!['enrollments'] as List).first['year_id']
         : null;
     _selectedGender = widget.student?['gender'];
-    _parentPhoneController = TextEditingController(text: widget.student?['parent_phone'] ?? '');
+    _parentPhoneController =
+        TextEditingController(text: widget.student?['parent_phone'] ?? '');
   }
 
   @override
@@ -51,7 +70,8 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
     setState(() => _isSaving = true);
     String? selectedGrade;
     String? selectedClass;
-    if (_classController.text.isNotEmpty) {
+    if (_classController.text.isNotEmpty &&
+        _classController.text.trim() != ' ') {
       // Parse format like "1B", "2A", "10A", etc.
       final text = _classController.text.trim();
       // Find the first non-digit character to separate grade and class
@@ -65,14 +85,25 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       if (splitIndex > 0) {
         selectedGrade = text.substring(0, splitIndex);
         selectedClass = text.substring(splitIndex);
+      } else {
+        // If no split found, treat the whole text as grade
+        selectedGrade = text;
+        selectedClass = '';
       }
+    } else {
+      // Handle empty class name case
+      selectedGrade = '';
+      selectedClass = '';
     }
     final studentData = {
       'name': _nameController.text.trim(),
       'gender': _selectedGender,
-      'parent_phone': _parentPhoneController.text.trim(),
+      'parent_phone': _parentPhoneController.text.trim().isEmpty
+          ? ' '
+          : _parentPhoneController.text.trim(),
       'status': 'active',
-      'school_id': widget.userInfo?['school_id'] ?? 'school_1', // Default to school_1 if not provided
+      'school_id': widget.userInfo?['school_id'] ??
+          'school_1', // Default to school_1 if not provided
       'enrollments': [
         {
           'grade': selectedGrade ?? '',
@@ -82,22 +113,30 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       ],
     };
     try {
-      // Duplicate check: name + phone
-      final existing = await FirebaseFirestore.instance
-        .collection('students')
-        .where('name', isEqualTo: _nameController.text.trim())
-        .where('parent_phone', isEqualTo: _parentPhoneController.text.trim())
-        .get();
-      if (existing.docs.isNotEmpty && (widget.student == null || widget.student!['id'] != existing.docs.first.id)) {
-        setState(() {
-          _isSaving = false;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Siswa dengan nama dan nomor HP ini sudah terdaftar!'), backgroundColor: Colors.red),
-          );
+      // Duplicate check: name + phone (only if phone is provided)
+      final phoneNumber = _parentPhoneController.text.trim();
+      if (phoneNumber.isNotEmpty) {
+        final existing = await FirebaseFirestore.instance
+            .collection('students')
+            .where('name', isEqualTo: _nameController.text.trim())
+            .where('parent_phone', isEqualTo: phoneNumber)
+            .get();
+        if (existing.docs.isNotEmpty &&
+            (widget.student == null ||
+                widget.student!['id'] != existing.docs.first.id)) {
+          setState(() {
+            _isSaving = false;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'Siswa dengan nama dan nomor HP ini sudah terdaftar!'),
+                  backgroundColor: Colors.red),
+            );
+          }
+          return;
         }
-        return;
       }
       String studentId;
       if (widget.student != null && widget.student!['id'] != null) {
@@ -126,47 +165,73 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       }
 
       // Handle class enrollment changes
-      if (selectedGrade != null && selectedClass != null && _selectedYearId != null) {
+      if (_selectedYearId != null) {
         // For editing: remove from old class if class changed
-        if (widget.student != null && widget.student!['enrollments'] != null && (widget.student!['enrollments'] as List).isNotEmpty) {
+        if (widget.student != null &&
+            widget.student!['enrollments'] != null &&
+            (widget.student!['enrollments'] as List).isNotEmpty) {
           final oldEnrollment = (widget.student!['enrollments'] as List).first;
           final oldGrade = oldEnrollment['grade'];
           final oldClass = oldEnrollment['class'];
           final oldYearId = oldEnrollment['year_id'];
-          
-          // If class/grade/year changed, remove from old class
-          if (oldGrade != selectedGrade || oldClass != selectedClass || oldYearId != _selectedYearId) {
-            final oldClassQuery = await FirebaseFirestore.instance
-                .collection('classes')
-                .where('grade', isEqualTo: oldGrade)
-                .where('class_name', isEqualTo: oldClass)
-                .where('year_id', isEqualTo: oldYearId)
-                .limit(1)
-                .get();
 
-            if (oldClassQuery.docs.isNotEmpty) {
-              final oldClassDoc = oldClassQuery.docs.first;
-              await oldClassDoc.reference.update({
-                'students': FieldValue.arrayRemove([studentId])
-              });
+          // If class/grade/year changed, remove from old class
+          if (oldGrade != selectedGrade ||
+              oldClass != selectedClass ||
+              oldYearId != _selectedYearId) {
+            Query oldClassQuery;
+            if (oldGrade != null && oldGrade.isNotEmpty) {
+              if (oldClass != null && oldClass.isNotEmpty) {
+                oldClassQuery = FirebaseFirestore.instance
+                    .collection('classes')
+                    .where('grade', isEqualTo: oldGrade)
+                    .where('class_name', isEqualTo: oldClass)
+                    .where('year_id', isEqualTo: oldYearId);
+              } else {
+                oldClassQuery = FirebaseFirestore.instance
+                    .collection('classes')
+                    .where('grade', isEqualTo: oldGrade)
+                    .where('class_name', isEqualTo: ' ')
+                    .where('year_id', isEqualTo: oldYearId);
+              }
+
+              final oldClassSnapshot = await oldClassQuery.limit(1).get();
+              if (oldClassSnapshot.docs.isNotEmpty) {
+                final oldClassDoc = oldClassSnapshot.docs.first;
+                await oldClassDoc.reference.update({
+                  'students': FieldValue.arrayRemove([studentId])
+                });
+              }
             }
           }
         }
 
         // Add to new class
-        final classQuery = await FirebaseFirestore.instance
-            .collection('classes')
-            .where('grade', isEqualTo: selectedGrade)
-            .where('class_name', isEqualTo: selectedClass)
-            .where('year_id', isEqualTo: _selectedYearId)
-            .limit(1)
-            .get();
+        if (selectedGrade != null && selectedGrade!.isNotEmpty) {
+          Query classQuery;
+          if (selectedClass != null && selectedClass!.isNotEmpty) {
+            // Both grade and class are provided
+            classQuery = FirebaseFirestore.instance
+                .collection('classes')
+                .where('grade', isEqualTo: selectedGrade)
+                .where('class_name', isEqualTo: selectedClass)
+                .where('year_id', isEqualTo: _selectedYearId);
+          } else {
+            // Only grade is provided, class_name is empty or space
+            classQuery = FirebaseFirestore.instance
+                .collection('classes')
+                .where('grade', isEqualTo: selectedGrade)
+                .where('class_name', isEqualTo: ' ')
+                .where('year_id', isEqualTo: _selectedYearId);
+          }
 
-        if (classQuery.docs.isNotEmpty) {
-          final classDoc = classQuery.docs.first;
-          await classDoc.reference.update({
-            'students': FieldValue.arrayUnion([studentId])
-          });
+          final classSnapshot = await classQuery.limit(1).get();
+          if (classSnapshot.docs.isNotEmpty) {
+            final classDoc = classSnapshot.docs.first;
+            await classDoc.reference.update({
+              'students': FieldValue.arrayUnion([studentId])
+            });
+          }
         }
       }
 
@@ -183,6 +248,16 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
     }
   }
 
+  void _showBulkCreationDialog() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            BulkStudentCreationScreen(userInfo: widget.userInfo),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.student != null;
@@ -197,7 +272,8 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Card(
           elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: Padding(
             padding: const EdgeInsets.all(24.0),
             child: Form(
@@ -209,18 +285,25 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                     controller: _nameController,
                     decoration: InputDecoration(
                       labelText: 'Nama Lengkap Siswa *',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
                       prefixIcon: const Icon(Icons.person_outline),
                     ),
-                    validator: (value) => value!.isEmpty ? 'Masukkan nama' : null,
+                    validator: (value) =>
+                        value!.isEmpty ? 'Masukkan nama' : null,
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
                     isExpanded: true,
                     value: _selectedGender,
                     items: const [
-                      DropdownMenuItem(value: 'Laki-laki', child: Text('Laki-laki')),
-                      DropdownMenuItem(value: 'Perempuan', child: Text('Perempuan')),
+                      DropdownMenuItem(
+                          value: null,
+                          child: Text('Pilih jenis kelamin (opsional)')),
+                      DropdownMenuItem(
+                          value: 'Laki-laki', child: Text('Laki-laki')),
+                      DropdownMenuItem(
+                          value: 'Perempuan', child: Text('Perempuan')),
                     ],
                     onChanged: (value) {
                       setState(() {
@@ -228,15 +311,17 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                       });
                     },
                     decoration: InputDecoration(
-                      labelText: 'Jenis Kelamin *',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      labelText: 'Jenis Kelamin',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
                       prefixIcon: const Icon(Icons.wc),
                     ),
-                    validator: (value) => value == null || value.isEmpty ? 'Pilih jenis kelamin' : null,
                   ),
                   const SizedBox(height: 16),
                   StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('classes').snapshots(),
+                    stream: FirebaseFirestore.instance
+                        .collection('classes')
+                        .snapshots(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
@@ -244,15 +329,28 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                       final classes = snapshot.data!.docs;
                       final classOptions = classes.map((doc) {
                         final data = doc.data() as Map<String, dynamic>;
-                        final label = '${data['grade']}${data['class_name']}';
+                        final grade = data['grade'] ?? '';
+                        final className = data['class_name'] ?? '';
+
+                        // Handle empty class name (stored as space)
+                        String label;
+                        if (className.trim() == '' || className == ' ') {
+                          label = grade; // Just show the grade
+                        } else {
+                          label = '$grade$className';
+                        }
+
                         return DropdownMenuItem<String>(
                           value: label,
                           child: Text(label),
                         );
                       }).toList();
+
                       return DropdownButtonFormField<String>(
                         isExpanded: true,
-                        value: _classController.text.isNotEmpty ? _classController.text : null,
+                        value: _classController.text.isNotEmpty
+                            ? _classController.text
+                            : null,
                         items: classOptions,
                         onChanged: (value) {
                           setState(() {
@@ -261,16 +359,21 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                         },
                         decoration: InputDecoration(
                           labelText: 'Kelas *',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                           prefixIcon: const Icon(Icons.class_outlined),
                         ),
-                        validator: (value) => value == null || value.isEmpty ? 'Pilih kelas' : null,
+                        validator: (value) => value == null || value.isEmpty
+                            ? 'Pilih kelas'
+                            : null,
                       );
                     },
                   ),
                   const SizedBox(height: 16),
                   StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('school_years').snapshots(),
+                    stream: FirebaseFirestore.instance
+                        .collection('school_years')
+                        .snapshots(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
@@ -293,10 +396,12 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                         },
                         decoration: InputDecoration(
                           labelText: 'Tahun Ajaran *',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                           prefixIcon: const Icon(Icons.calendar_today_outlined),
                         ),
-                        validator: (value) => value == null ? 'Pilih tahun ajaran' : null,
+                        validator: (value) =>
+                            value == null ? 'Pilih tahun ajaran' : null,
                       );
                     },
                   ),
@@ -304,41 +409,497 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                   TextFormField(
                     controller: _parentPhoneController,
                     decoration: InputDecoration(
-                      labelText: 'No. HP Orang Tua *',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      labelText: 'No. HP Orang Tua',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
                       prefixIcon: const Icon(Icons.phone_outlined),
                     ),
                     keyboardType: TextInputType.phone,
-                    validator: (value) => value!.isEmpty ? 'Masukkan no. HP' : null,
                   ),
                   const SizedBox(height: 24),
+                  if (!isEdit) ...[
+                    ElevatedButton.icon(
+                      onPressed: _showBulkCreationDialog,
+                      icon: const Icon(Icons.group_add_outlined),
+                      label: const Text('Tambah Siswa Secara Massal'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        backgroundColor: Colors.orange,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   _isSaving
                       ? const Center(child: CircularProgressIndicator())
                       : ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _saveStudent,
-                    icon: _isSaving
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.save_outlined),
-                    label: Text(isEdit ? 'Perbarui Siswa' : 'Simpan Siswa'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      backgroundColor: Colors.teal,
-                    ),
-                  ),
+                          onPressed: _isSaving ? null : _saveStudent,
+                          icon: _isSaving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.save_outlined),
+                          label:
+                              Text(isEdit ? 'Perbarui Siswa' : 'Simpan Siswa'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            backgroundColor: Colors.teal,
+                          ),
+                        ),
                   if (_message != null) ...[
                     const SizedBox(height: 16),
                     Text(
                       _message!,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: _message!.startsWith('Gagal') ? Colors.red : Colors.green,
+                        color: _message!.startsWith('Gagal')
+                            ? Colors.red
+                            : Colors.green,
                       ),
                     ),
                   ],
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class BulkStudentCreationScreen extends StatefulWidget {
+  final Map<String, String>? userInfo;
+
+  const BulkStudentCreationScreen({Key? key, this.userInfo}) : super(key: key);
+
+  @override
+  State<BulkStudentCreationScreen> createState() =>
+      _BulkStudentCreationScreenState();
+}
+
+class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
+  final _formKey = GlobalKey<FormState>();
+  String? _selectedGender;
+  String? _selectedClass;
+  String? _selectedYearId;
+  int _numberOfStudents = 1;
+  bool _isLoading = false;
+  List<TextEditingController> _nameControllers = [];
+  List<TextEditingController> _phoneControllers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _updateControllers();
+  }
+
+  void _updateControllers() {
+    _nameControllers.clear();
+    _phoneControllers.clear();
+    for (int i = 0; i < _numberOfStudents; i++) {
+      _nameControllers.add(TextEditingController());
+      _phoneControllers.add(TextEditingController());
+    }
+  }
+
+  @override
+  void dispose() {
+    for (var controller in _nameControllers) {
+      controller.dispose();
+    }
+    for (var controller in _phoneControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _saveBulkStudents() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedClass == null || _selectedYearId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Pilih kelas dan tahun ajaran terlebih dahulu!'),
+            backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Parse class format
+      String? selectedGrade;
+      String? selectedClass;
+      if (_selectedClass!.isNotEmpty && _selectedClass!.trim() != ' ') {
+        final text = _selectedClass!.trim();
+        int splitIndex = 0;
+        for (int i = 0; i < text.length; i++) {
+          if (!RegExp(r'[0-9]').hasMatch(text[i])) {
+            splitIndex = i;
+            break;
+          }
+        }
+        if (splitIndex > 0) {
+          selectedGrade = text.substring(0, splitIndex);
+          selectedClass = text.substring(splitIndex);
+        } else {
+          // If no split found, treat the whole text as grade
+          selectedGrade = text;
+          selectedClass = '';
+        }
+      } else {
+        // Handle empty class name case
+        selectedGrade = '';
+        selectedClass = '';
+      }
+
+      final firestore = FirebaseFirestore.instance;
+      final batch = firestore.batch();
+      final studentIds = <String>[];
+
+      // Create students
+      for (int i = 0; i < _numberOfStudents; i++) {
+        final name = _nameControllers[i].text.trim();
+        final phone = _phoneControllers[i].text.trim();
+
+        if (name.isEmpty) continue; // Skip empty names
+
+        final studentData = {
+          'name': name,
+          'gender': _selectedGender,
+          'parent_phone': phone.isEmpty ? ' ' : phone,
+          'status': 'active',
+          'school_id': widget.userInfo?['school_id'] ?? 'school_1',
+          'enrollments': [
+            {
+              'grade': selectedGrade ?? '',
+              'class': selectedClass ?? '',
+              'year_id': _selectedYearId,
+            }
+          ],
+        };
+
+        final docRef = firestore.collection('students').doc();
+        batch.set(docRef, studentData);
+        studentIds.add(docRef.id);
+      }
+
+      // Commit the batch
+      await batch.commit();
+
+      // Add students to class
+      if (_selectedYearId != null) {
+        Query classQuery;
+        if (selectedGrade != null && selectedGrade!.isNotEmpty) {
+          if (selectedClass != null && selectedClass!.isNotEmpty) {
+            // Both grade and class are provided
+            classQuery = firestore
+                .collection('classes')
+                .where('grade', isEqualTo: selectedGrade)
+                .where('class_name', isEqualTo: selectedClass)
+                .where('year_id', isEqualTo: _selectedYearId);
+          } else {
+            // Only grade is provided, class_name is empty or space
+            classQuery = firestore
+                .collection('classes')
+                .where('grade', isEqualTo: selectedGrade)
+                .where('class_name', isEqualTo: ' ')
+                .where('year_id', isEqualTo: _selectedYearId);
+          }
+        } else {
+          // No grade provided, skip class enrollment
+          return;
+        }
+
+        final classSnapshot = await classQuery.limit(1).get();
+        if (classSnapshot.docs.isNotEmpty) {
+          final classDoc = classSnapshot.docs.first;
+          await classDoc.reference
+              .update({'students': FieldValue.arrayUnion(studentIds)});
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Berhasil menambahkan $_numberOfStudents siswa!')),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Text('Tambah Siswa Secara Massal'),
+        backgroundColor: Colors.white,
+        elevation: 1,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Pengaturan Umum',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        value: _selectedGender,
+                        items: const [
+                          DropdownMenuItem(
+                              value: null,
+                              child: Text('Pilih jenis kelamin (opsional)')),
+                          DropdownMenuItem(
+                              value: 'Laki-laki', child: Text('Laki-laki')),
+                          DropdownMenuItem(
+                              value: 'Perempuan', child: Text('Perempuan')),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedGender = value;
+                          });
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Jenis Kelamin',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(Icons.wc),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('classes')
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          }
+                          final classes = snapshot.data!.docs;
+                          final classOptions = classes.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            final grade = data['grade'] ?? '';
+                            final className = data['class_name'] ?? '';
+
+                            // Handle empty class name (stored as space)
+                            String label;
+                            if (className.trim() == '' || className == ' ') {
+                              label = grade; // Just show the grade
+                            } else {
+                              label = '$grade$className';
+                            }
+
+                            return DropdownMenuItem<String>(
+                              value: label,
+                              child: Text(label),
+                            );
+                          }).toList();
+                          return DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            value: _selectedClass,
+                            items: classOptions,
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedClass = value;
+                              });
+                            },
+                            decoration: InputDecoration(
+                              labelText: 'Kelas *',
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              prefixIcon: const Icon(Icons.class_outlined),
+                            ),
+                            validator: (value) => value == null || value.isEmpty
+                                ? 'Pilih kelas'
+                                : null,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('school_years')
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          }
+                          final years = snapshot.data!.docs;
+                          return DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            value: _selectedYearId,
+                            items: years.map((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              return DropdownMenuItem<String>(
+                                value: doc.id,
+                                child: Text(data['name'] ?? doc.id),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedYearId = value;
+                              });
+                            },
+                            decoration: InputDecoration(
+                              labelText: 'Tahun Ajaran *',
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              prefixIcon:
+                                  const Icon(Icons.calendar_today_outlined),
+                            ),
+                            validator: (value) =>
+                                value == null ? 'Pilih tahun ajaran' : null,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        initialValue: '1',
+                        decoration: InputDecoration(
+                          labelText: 'Jumlah Siswa *',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(Icons.people_outline),
+                        ),
+                        keyboardType: TextInputType.number,
+                        validator: (value) {
+                          final number = int.tryParse(value ?? '');
+                          if (number == null || number < 1 || number > 50) {
+                            return 'Masukkan angka antara 1-50';
+                          }
+                          return null;
+                        },
+                        onChanged: (value) {
+                          final number = int.tryParse(value);
+                          if (number != null && number >= 1 && number <= 50) {
+                            setState(() {
+                              _numberOfStudents = number;
+                              _updateControllers();
+                            });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (_selectedClass != null && _selectedYearId != null) ...[
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Data Siswa',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 16),
+                        ...List.generate(_numberOfStudents, (index) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Siswa ${index + 1}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16),
+                                ),
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  controller: _nameControllers[index],
+                                  decoration: InputDecoration(
+                                    labelText: 'Nama Lengkap *',
+                                    border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8)),
+                                    prefixIcon:
+                                        const Icon(Icons.person_outline),
+                                  ),
+                                  validator: (value) =>
+                                      value!.isEmpty ? 'Masukkan nama' : null,
+                                ),
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  controller: _phoneControllers[index],
+                                  decoration: InputDecoration(
+                                    labelText: 'No. HP Orang Tua (opsional)',
+                                    border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8)),
+                                    prefixIcon:
+                                        const Icon(Icons.phone_outlined),
+                                  ),
+                                  keyboardType: TextInputType.phone,
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : ElevatedButton.icon(
+                      onPressed: _isLoading ? null : _saveBulkStudents,
+                      icon: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.save_outlined),
+                      label: const Text('Simpan Semua Siswa'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        backgroundColor: Colors.teal,
+                      ),
+                    ),
+            ],
           ),
         ),
       ),
@@ -372,4 +933,4 @@ Future<void> populateClassWithStudents({
     'grade': grade,
     'students': studentIds,
   });
-} 
+}

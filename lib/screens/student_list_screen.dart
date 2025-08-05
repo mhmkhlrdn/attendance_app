@@ -64,6 +64,39 @@ class _StudentListScreenState extends State<StudentListScreen> {
     return StudentHelperService.getCurrentClassDisplay(studentData);
   }
 
+  IconData _getGenderIcon(String? gender) {
+    switch (gender) {
+      case 'Laki-laki':
+        return Icons.male;
+      case 'Perempuan':
+        return Icons.female;
+      default:
+        return Icons.person_outline;
+    }
+  }
+
+  Color _getGenderColor(String? gender) {
+    switch (gender) {
+      case 'Laki-laki':
+        return Colors.blue[100]!;
+      case 'Perempuan':
+        return Colors.pink[100]!;
+      default:
+        return Colors.grey[100]!;
+    }
+  }
+
+  Color _getGenderIconColor(String? gender) {
+    switch (gender) {
+      case 'Laki-laki':
+        return Colors.blue[800]!;
+      case 'Perempuan':
+        return Colors.pink[800]!;
+      default:
+        return Colors.grey[600]!;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -179,8 +212,8 @@ class _StudentListScreenState extends State<StudentListScreen> {
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         leading: CircleAvatar(
-                          backgroundColor: Colors.blue[100],
-                          child: Icon(Icons.face_outlined, color: Colors.blue[800]),
+                          backgroundColor: _getGenderColor(data['gender']),
+                          child: Icon(_getGenderIcon(data['gender']), color: _getGenderIconColor(data['gender'])),
                         ),
                         title: Text(data['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Text(_getClassDisplay(data)),
