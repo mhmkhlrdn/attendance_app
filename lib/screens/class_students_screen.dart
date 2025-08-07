@@ -17,6 +17,27 @@ class ClassStudentsScreen extends StatelessWidget {
     required this.studentIds,
   }) : super(key: key);
 
+  /// Load students in batches to handle Firestore's whereIn limit of 10 items
+  Future<List<QueryDocumentSnapshot>> _loadStudentsInBatches(List<String> studentIds) async {
+    List<QueryDocumentSnapshot> allStudentDocs = [];
+    
+    // Firestore whereIn has a limit of 10 items, so we need to batch the queries
+    const batchSize = 10;
+    for (int i = 0; i < studentIds.length; i += batchSize) {
+      final end = (i + batchSize < studentIds.length) ? i + batchSize : studentIds.length;
+      final batchIds = studentIds.sublist(i, end);
+      
+      final batchQuery = await FirebaseFirestore.instance
+        .collection('students')
+        .where(FieldPath.documentId, whereIn: batchIds)
+        .get();
+      
+      allStudentDocs.addAll(batchQuery.docs);
+    }
+    
+    return allStudentDocs;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -25,20 +46,17 @@ class ClassStudentsScreen extends StatelessWidget {
       ),
       body: studentIds.isEmpty
           ? const Center(child: Text('Tidak ada siswa di kelas ini.'))
-          : FutureBuilder<QuerySnapshot>(
-        future: FirebaseFirestore.instance
-            .collection('students')
-            .where(FieldPath.documentId, whereIn: studentIds)
-            .get(),
+          : FutureBuilder<List<QueryDocumentSnapshot>>(
+        future: _loadStudentsInBatches(studentIds),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
             return const Center(child: Text('Tidak ada siswa ditemukan.'));
           }
           // Filter students to only show those whose current enrollment matches this class
-          final allStudents = snapshot.data!.docs;
+          final allStudents = snapshot.data!;
           final currentStudents = <QueryDocumentSnapshot>[];
           
                     for (var studentDoc in allStudents) {

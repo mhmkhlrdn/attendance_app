@@ -33,7 +33,10 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   }
 
   Future<void> _fetchClasses() async {
-    final snapshot = await FirebaseFirestore.instance.collection('classes').get();
+    final snapshot = await FirebaseFirestore.instance
+        .collection('classes')
+        .where('school_id', isEqualTo: widget.userInfo['school_id'])
+        .get();
     setState(() {
       _classes = snapshot.docs;
     });

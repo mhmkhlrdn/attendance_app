@@ -179,7 +179,7 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                       ),
                       const SizedBox(height: 12),
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('classes').snapshots(),
+                        stream: FirebaseFirestore.instance.collection('classes').where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1').snapshots(),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState == ConnectionState.waiting) {
                             return const Center(child: CircularProgressIndicator());

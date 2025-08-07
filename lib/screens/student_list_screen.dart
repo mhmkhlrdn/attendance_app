@@ -97,6 +97,22 @@ class _StudentListScreenState extends State<StudentListScreen> {
     }
   }
 
+  String _getClassKey(Map<String, dynamic> studentData) {
+    final currentEnrollment = StudentHelperService.getCurrentEnrollment(studentData);
+    if (currentEnrollment != null) {
+      final grade = currentEnrollment['grade'] ?? '';
+      final className = currentEnrollment['class'] ?? '';
+      if (grade.toString().isNotEmpty) {
+        return '$grade$className';
+      }
+    }
+    return '';
+  }
+
+  String _getClassDisplayName(String classKey) {
+    return classKey.isEmpty ? 'Tanpa Kelas' : 'Kelas $classKey';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -127,7 +143,6 @@ class _StudentListScreenState extends State<StudentListScreen> {
                 const SizedBox(width: 8),
                 Builder(
                   builder: (context) {
-                    // Collect all class options from students
                     final students = FirebaseFirestore.instance.collection('students').snapshots();
                     return StreamBuilder<QuerySnapshot>(
                       stream: students,
@@ -136,21 +151,15 @@ class _StudentListScreenState extends State<StudentListScreen> {
                         if (snapshot.hasData) {
                           for (var doc in snapshot.data!.docs) {
                             final data = doc.data() as Map<String, dynamic>;
-                            final enrollments = data['enrollments'] as List?;
-                            if (enrollments != null && enrollments.isNotEmpty) {
-                              final enrollment = enrollments.first as Map<String, dynamic>;
-                              final grade = enrollment['grade'] ?? '';
-                              final className = enrollment['class'] ?? '';
-                              if (grade.isNotEmpty && className.isNotEmpty) {
-                                kelasSet.add('$grade$className');
-                              }
-                            }
+                            final classKey = _getClassKey(data);
+                            kelasSet.add(classKey);
                           }
                         }
+                        final kelasList = kelasSet.toList()..sort((a, b) => _getClassDisplayName(a).compareTo(_getClassDisplayName(b)));
                         return IconButton(
                           icon: const Icon(Icons.filter_list),
                           tooltip: 'Filter',
-                          onPressed: () => _showFilterDialog(kelasSet.toList()),
+                          onPressed: () => _showFilterDialog(kelasList),
                         );
                       },
                     );
@@ -183,77 +192,100 @@ class _StudentListScreenState extends State<StudentListScreen> {
                     ),
                   );
                 }
-                final students = snapshot.data!.docs.where((doc) {
+                // Group students by class
+                final Map<String, List<QueryDocumentSnapshot>> classGroups = {};
+                for (var doc in snapshot.data!.docs) {
                   final data = doc.data() as Map<String, dynamic>;
-                  final matchesSearch = _search.isEmpty || (data['name'] ?? '').toString().toLowerCase().contains(_search);
-                  final enrollments = data['enrollments'] as List?;
-                  String kelas = '';
-                  if (enrollments != null && enrollments.isNotEmpty) {
-                    final enrollment = enrollments.first as Map<String, dynamic>;
-                    final grade = enrollment['grade'] ?? '';
-                    final className = enrollment['class'] ?? '';
-                    if (grade.isNotEmpty && className.isNotEmpty) {
-                      kelas = '$grade$className';
-                    }
-                  }
-                  final matchesFilter = _classFilter == null || _classFilter == '' || kelas == _classFilter;
-                  return matchesSearch && matchesFilter;
-                }).toList();
+                  final name = (data['name'] ?? '').toString().toLowerCase();
+                  if (_search.isNotEmpty && !name.contains(_search)) continue;
+                  final classKey = _getClassKey(data);
+                  if (_classFilter != null && _classFilter != '' && classKey != _classFilter) continue;
+                  if (!classGroups.containsKey(classKey)) classGroups[classKey] = [];
+                  classGroups[classKey]!.add(doc);
+                }
+                final sortedClasses = classGroups.keys.toList()
+                  ..sort((a, b) => _getClassDisplayName(a).compareTo(_getClassDisplayName(b)));
                 return ListView.builder(
                   padding: const EdgeInsets.all(8),
-                  itemCount: students.length,
+                  itemCount: sortedClasses.fold(0, (prev, k) => prev! + classGroups[k]!.length + 1),
                   itemBuilder: (context, index) {
-                    final student = students[index];
-                    final data = student.data() as Map<String, dynamic>;
-                    return Card(
-                      elevation: 2,
-                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                        leading: CircleAvatar(
-                          backgroundColor: _getGenderColor(data['gender']),
-                          child: Icon(_getGenderIcon(data['gender']), color: _getGenderIconColor(data['gender'])),
-                        ),
-                        title: Text(data['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text(_getClassDisplay(data)),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => StudentDetailScreen(studentId: student.id),
-                            ),
-                          );
-                        },
-                        trailing: widget.role == 'admin'
-                            ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit, color: Colors.blueGrey),
-                              onPressed: () async {
-                                await Navigator.push(
+                    int runningIndex = 0;
+                    for (final classKey in sortedClasses) {
+                      // Class header
+                      if (index == runningIndex) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                          child: Text(
+                            _getClassDisplayName(classKey),
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.teal),
+                          ),
+                        );
+                      }
+                      runningIndex++;
+                      // Students in this class, sorted alphabetically
+                      final students = classGroups[classKey]!..sort((a, b) {
+                        final nameA = ((a.data() as Map<String, dynamic>)['name'] ?? '').toString().toLowerCase();
+                        final nameB = ((b.data() as Map<String, dynamic>)['name'] ?? '').toString().toLowerCase();
+                        return nameA.compareTo(nameB);
+                      });
+                      for (var s = 0; s < students.length; s++) {
+                        if (index == runningIndex) {
+                          final student = students[s];
+                          final data = student.data() as Map<String, dynamic>;
+                          return Card(
+                            elevation: 2,
+                            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                              leading: CircleAvatar(
+                                backgroundColor: _getGenderColor(data['gender']),
+                                child: Icon(_getGenderIcon(data['gender']), color: _getGenderIconColor(data['gender'])),
+                              ),
+                              title: Text(data['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              subtitle: Text(_getClassDisplay(data)),
+                              onTap: () {
+                                Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => StudentFormScreen(
-                                      student: {...data, 'id': student.id},
-                                      userInfo: widget.userInfo,
-                                    ),
+                                    builder: (context) => StudentDetailScreen(studentId: student.id),
                                   ),
                                 );
                               },
+                              trailing: widget.role == 'admin'
+                                  ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.edit, color: Colors.blueGrey),
+                                    onPressed: () async {
+                                      await Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => StudentFormScreen(
+                                            student: {...data, 'id': student.id},
+                                            userInfo: widget.userInfo,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                    onPressed: () async {
+                                      await _deleteStudentAndRemoveFromClasses(student.id);
+                                    },
+                                  ),
+                                ],
+                              )
+                                  : null,
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                              onPressed: () async {
-                                await _deleteStudentAndRemoveFromClasses(student.id);
-                              },
-                            ),
-                          ],
-                        )
-                            : null,
-                      ),
-                    );
+                          );
+                        }
+                        runningIndex++;
+                      }
+                    }
+                    return const SizedBox.shrink();
                   },
                 );
               },

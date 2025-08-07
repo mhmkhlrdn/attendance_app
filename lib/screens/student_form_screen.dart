@@ -321,6 +321,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collection('classes')
+                        .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
                         .snapshots(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
@@ -702,6 +703,7 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
                       StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
                             .collection('classes')
+                            .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
                             .snapshots(),
                         builder: (context, snapshot) {
                           if (!snapshot.hasData) {

@@ -272,10 +272,10 @@ class OfflineSyncService {
           final scheduleType = schedule['schedule_type'] ?? 'subject_specific';
           
           if (scheduleType == 'daily_morning') {
-            // Check if it's morning time (6:30 AM)
+            // Check if it's morning time (6:30 AM to 8:30 AM)
             final currentMinutes = now.hour * 60 + now.minute;
             final morningStart = 6 * 60 + 30; // 6:30 AM
-            final morningEnd = 7 * 60; // 7:00 AM
+            final morningEnd = 8 * 60 + 30; // 8:30 AM
             
             if (currentMinutes >= morningStart && currentMinutes <= morningEnd) {
               return {
@@ -315,10 +315,10 @@ class OfflineSyncService {
           final scheduleType = schedule['schedule_type'] ?? 'subject_specific';
           
           if (scheduleType == 'daily_morning') {
-            // Check if it's morning time (6:30 AM)
+            // Check if it's morning time (6:30 AM to 8:30 AM)
             final currentMinutes = now.hour * 60 + now.minute;
             final morningStart = 6 * 60 + 30; // 6:30 AM
-            final morningEnd = 7 * 60; // 7:00 AM
+            final morningEnd = 8 * 60 + 30; // 8:30 AM
             
             if (currentMinutes >= morningStart && currentMinutes <= morningEnd) {
               return schedule;
@@ -360,14 +360,29 @@ class OfflineSyncService {
 
         if (studentIds.isEmpty) return [];
 
-        final studentsQuery = await _firestore
+        // Load students in batches to handle Firestore's whereIn limit of 10 items
+        List<QueryDocumentSnapshot> allStudentDocs = [];
+        
+        // Firestore whereIn has a limit of 10 items, so we need to batch the queries
+        const batchSize = 10;
+        for (int i = 0; i < studentIds.length; i += batchSize) {
+          final end = (i + batchSize < studentIds.length) ? i + batchSize : studentIds.length;
+          final batchIds = studentIds.sublist(i, end);
+          
+          final batchQuery = await _firestore
             .collection('students')
-            .where(FieldPath.documentId, whereIn: studentIds)
+            .where(FieldPath.documentId, whereIn: batchIds)
             .get();
+          
+          allStudentDocs.addAll(batchQuery.docs);
+        }
 
-        return studentsQuery.docs.map((doc) => {
-          'id': doc.id,
-          ...doc.data(),
+        return allStudentDocs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return {
+            'id': doc.id,
+            ...data,
+          };
         }).toList();
       } else {
         // Use local storage - this would need to be implemented based on your data structure

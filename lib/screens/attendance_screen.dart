@@ -117,14 +117,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         print('Schedule data: $data');
         
         if (scheduleType == 'daily_morning') {
-          // Check if it's morning time (6:30 AM)
+          // Check if it's morning time (6:30 AM to 8:30 AM)
           final currentTime = now.hour * 60 + now.minute;
           final morningTime = 6 * 60 + 30; // 6:30 AM
-          final morningEndTime = 7 * 60; // 7:00 AM
+          final morningEndTime = 8 * 60 + 30; // 8:30 AM
           print('Daily morning check:');
           print('  Current time in minutes: $currentTime');
           print('  Morning start: $morningTime (6:30 AM)');
-          print('  Morning end: $morningEndTime (7:00 AM)');
+          print('  Morning end: $morningEndTime (8:30 AM)');
           print('  Is within morning time: ${currentTime >= morningTime && currentTime <= morningEndTime}');
           
           if (currentTime >= morningTime && currentTime <= morningEndTime) {
@@ -305,15 +305,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         return;
       }
 
-      // Load student details
-      final studentsQuery = await FirebaseFirestore.instance
-        .collection('students')
-        .where(FieldPath.documentId, whereIn: studentIds)
-        .get();
+      // Load student details (handle large classes with batch queries)
+      List<QueryDocumentSnapshot> allStudentDocs = [];
+      
+      // Firestore whereIn has a limit of 10 items, so we need to batch the queries
+      const batchSize = 10;
+      for (int i = 0; i < studentIds.length; i += batchSize) {
+        final end = (i + batchSize < studentIds.length) ? i + batchSize : studentIds.length;
+        final batchIds = studentIds.sublist(i, end);
+        
+        print('Querying batch ${(i ~/ batchSize) + 1}: ${batchIds.length} students');
+        
+        final batchQuery = await FirebaseFirestore.instance
+          .collection('students')
+          .where(FieldPath.documentId, whereIn: batchIds)
+          .get();
+        
+        allStudentDocs.addAll(batchQuery.docs);
+      }
 
-      print('Found ${studentsQuery.docs.length} students with details');
+      print('Found ${allStudentDocs.length} students with details');
 
-      final studentsList = studentsQuery.docs.map((doc) {
+      final studentsList = allStudentDocs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return {
           'id': doc.id,
@@ -490,6 +503,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 // Students List
                 Expanded(
                   child: ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 80), // Add bottom padding for FAB
                     itemCount: students.length,
                     itemBuilder: (context, index) {
                       final s = students[index];

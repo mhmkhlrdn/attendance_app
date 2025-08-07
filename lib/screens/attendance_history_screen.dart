@@ -1,6 +1,20 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:csv/csv.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import 'attendance_detail_screen.dart';
+import 'package:excel/excel.dart';
+
+// Helper class for timetable columns
+class _TimetableColumn {
+  final DateTime date;
+  final String? teacherName;
+  final Map<String, dynamic>? attendance;
+  final String? type;
+  _TimetableColumn({required this.date, this.teacherName, this.attendance, this.type});
+}
 
 class AttendanceHistoryScreen extends StatefulWidget {
   final Map<String, String> userInfo;
@@ -390,20 +404,227 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    print('\n=== BUILD METHOD ===');
-    print('Is loading: $_isLoading');
-    print('Available months: ${_availableMonths.length}');
-    print('Selected month: $_selectedMonth');
-    print('Monthly data keys: ${_monthlyData.keys.toList()}');
-    print('=== END BUILD METHOD ===\n');
-    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Riwayat Presensi'),
         backgroundColor: Colors.white,
         elevation: 1,
       ),
-      body: _buildTimetableView(),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Container(
+              color: Colors.grey[100],
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  // Filters Section
+                  if (widget.role == 'admin') ...[
+                    Card(
+                      margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Filter', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                const Icon(Icons.class_, size: 20, color: Colors.teal),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: DropdownButton<String?>(
+                                    value: _selectedClassId,
+                                    isExpanded: true,
+                                    hint: const Text('Semua Kelas'),
+                                    items: [
+                                      const DropdownMenuItem<String?>(
+                                        value: null,
+                                        child: Text('Semua Kelas'),
+                                      ),
+                                      ..._availableClasses.map((classData) => DropdownMenuItem<String?>(
+                                        value: classData['id'] as String,
+                                        child: Text(classData['name'] as String),
+                                      )).toList(),
+                                    ],
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _selectedClassId = value;
+                                      });
+                                      _loadAttendanceData();
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                const Icon(Icons.event_note, size: 20, color: Colors.teal),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: DropdownButton<String?>(
+                                    value: _selectedAttendanceType,
+                                    isExpanded: true,
+                                    hint: const Text('Semua Jenis'),
+                                    items: [
+                                      const DropdownMenuItem<String?>(
+                                        value: null,
+                                        child: Text('Semua Jenis'),
+                                      ),
+                                      const DropdownMenuItem<String>(
+                                        value: 'morning',
+                                        child: Text('Presensi Pagi'),
+                                      ),
+                                      const DropdownMenuItem<String>(
+                                        value: 'subject',
+                                        child: Text('Presensi Mata Pelajaran'),
+                                      ),
+                                    ],
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _selectedAttendanceType = value;
+                                      });
+                                      _loadAttendanceData();
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                  // Month Selector & Export
+                  Card(
+                    margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 20, color: Colors.teal),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: DropdownButton<String>(
+                              value: _selectedMonth,
+                              isExpanded: true,
+                              items: _availableMonths.map((month) {
+                                final date = DateTime.parse('$month-01');
+                                return DropdownMenuItem(
+                                  value: month,
+                                  child: Text(_getMonthDisplay(date)),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedMonth = value!;
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          ElevatedButton.icon(
+                            onPressed: _exportToExcel,
+                            icon: const Icon(Icons.download),
+                            label: const Text('Export Excel'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.teal,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Legend (admin only)
+                  if (widget.role == 'admin' && _selectedAttendanceType != 'subject')
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          const Text('Keterangan:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade100,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Pagi',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade800,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Text('= Presensi Pagi', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade100,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Mata Pelajaran',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.green.shade800,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Text('= Presensi Mata Pelajaran', style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  // Timetable Section
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    child: Card(
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: SizedBox(
+                          height: 500,
+                          child: FutureBuilder<Widget>(
+                            future: _buildTimetable(),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState == ConnectionState.waiting) {
+                                return const Center(child: CircularProgressIndicator());
+                              }
+                              return snapshot.data ?? const Center(child: Text('Tidak ada data untuk bulan ini.'));
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 
@@ -492,7 +713,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
             ),
           ),
         
-        // Month selector
+        // Month selector and export button
         Container(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -515,6 +736,16 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                       _selectedMonth = value!;
                     });
                   },
+                ),
+              ),
+              const SizedBox(width: 16),
+              ElevatedButton.icon(
+                onPressed: _exportToExcel,
+                icon: const Icon(Icons.download),
+                label: const Text('Export Excel'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
                 ),
               ),
             ],
@@ -659,37 +890,69 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     print('Unique dates found: ${dates.length}');
     print('Dates: ${dates.map((d) => '${d.day}').toList()}');
     
-    // Get all unique students
-    final students = <String, String>{}; // studentId -> studentName
-    print('\n--- Processing students ---');
+    // --- Build a map: date -> list of attendance records (for multi-teacher per date) ---
+    final Map<DateTime, List<Map<String, dynamic>>> dateToAttendances = {};
+    for (var attendance in monthData) {
+      final date = attendance['date'] as DateTime;
+      final dayStart = DateTime(date.year, date.month, date.day);
+      dateToAttendances.putIfAbsent(dayStart, () => []).add(attendance);
+    }
+    final datesForTimetable = dateToAttendances.keys.toList()..sort();
+    // --- Build columns: for each date, one column per teacher (if admin) ---
+    List<_TimetableColumn> timetableColumns = [];
+    for (final date in datesForTimetable) {
+      final attendances = dateToAttendances[date]!;
+      if (widget.role == 'admin' && attendances.length > 1) {
+        // Multiple teachers: one column per teacher
+        attendances.sort((a, b) {
+          final tA = _teacherNames[(a['data'] as Map<String, dynamic>)['teacher_id']] ?? '';
+          final tB = _teacherNames[(b['data'] as Map<String, dynamic>)['teacher_id']] ?? '';
+          return tA.compareTo(tB);
+        });
+        for (var att in attendances) {
+          final teacherId = (att['data'] as Map<String, dynamic>)['teacher_id'] as String?;
+          final teacherName = teacherId != null ? _teacherNames[teacherId] ?? 'Unknown' : 'Unknown';
+          final type = (() {
+            final scheduleId = (att['data'] as Map<String, dynamic>)['schedule_id'] as String?;
+            if (scheduleId != null) {
+              final scheduleType = dateTypeMap[date] ?? '';
+              return scheduleType;
+            }
+            return '';
+          })();
+          timetableColumns.add(_TimetableColumn(date: date, teacherName: teacherName, attendance: att, type: type));
+        }
+      } else {
+        // Single teacher or not admin: one column per date
+        final att = attendances.first;
+        final teacherId = (att['data'] as Map<String, dynamic>)['teacher_id'] as String?;
+        final teacherName = teacherId != null ? _teacherNames[teacherId] ?? 'Unknown' : 'Unknown';
+        final type = (() {
+          final scheduleId = (att['data'] as Map<String, dynamic>)['schedule_id'] as String?;
+          if (scheduleId != null) {
+            final scheduleType = dateTypeMap[date] ?? '';
+            return scheduleType;
+          }
+          return '';
+        })();
+        timetableColumns.add(_TimetableColumn(date: date, teacherName: teacherName, attendance: att, type: type));
+      }
+    }
+    // --- Build students list as before ---
+    final students = <String, String>{};
     for (var attendance in monthData) {
       final data = attendance['data'] as Map<String, dynamic>;
       final studentIds = List<String>.from(data['student_ids'] ?? []);
       final classId = data['class_id'];
-      
-      print('  Attendance ${attendance['id']}: ${studentIds.length} students, class: $classId');
-      
-      // If a class filter is applied, only include students from that class
-      if (_selectedClassId != null && classId != _selectedClassId) {
-        print('    Skipping students from different class (${classId} vs ${_selectedClassId})');
-        continue;
-      }
-      
+      if (_selectedClassId != null && classId != _selectedClassId) continue;
       for (var studentId in studentIds) {
         if (!students.containsKey(studentId)) {
-          print('    New student: $studentId');
-          // Use stored student name
           final studentName = _studentNames[studentId] ?? 'Unknown';
           students[studentId] = studentName;
-          print('    Student name: $studentName');
         }
       }
     }
-    
-    print('Total unique students: ${students.length}');
-    print('Student IDs: ${students.keys.toList()}');
-    print('=== END BUILDING TIMETABLE ===\n');
-
+    // --- Build DataTable ---
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
@@ -706,19 +969,19 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                 ),
               ),
             ),
-            ...dates.map((date) => DataColumn(
+            ...timetableColumns.map((col) => DataColumn(
               label: Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      '${date.day}',
+                      '${col.date.day}',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
-                    if (widget.role == 'admin' && dateTeacherMap.containsKey(date))
+                    if (widget.role == 'admin')
                       Text(
-                        dateTeacherMap[date]!,
+                        col.teacherName ?? '',
                         style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.normal,
@@ -728,19 +991,19 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    if (widget.role == 'admin' && dateTypeMap.containsKey(date))
+                    if (widget.role == 'admin' && col.type != null && col.type!.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                         decoration: BoxDecoration(
-                          color: dateTypeMap[date] == 'Pagi' ? Colors.blue.shade100 : Colors.green.shade100,
+                          color: col.type == 'Pagi' ? Colors.blue.shade100 : Colors.green.shade100,
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          dateTypeMap[date]!,
+                          col.type ?? '',
                           style: TextStyle(
                             fontSize: 8,
                             fontWeight: FontWeight.bold,
-                            color: dateTypeMap[date] == 'Pagi' ? Colors.blue.shade800 : Colors.green.shade800,
+                            color: col.type == 'Pagi' ? Colors.blue.shade800 : Colors.green.shade800,
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -748,7 +1011,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                   ],
                 ),
               ),
-            )).toList(),
+            )),
             const DataColumn(
               label: Expanded(
                 child: Text(
@@ -789,10 +1052,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           rows: students.entries.map((studentEntry) {
             final studentId = studentEntry.key;
             final studentName = studentEntry.value;
-            
-            // Calculate totals for this student
             int sakitCount = 0, izinCount = 0, alfaCount = 0, hadirCount = 0;
-            
             return DataRow(
               cells: [
                 DataCell(
@@ -801,15 +1061,13 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w500),
                   ),
                 ),
-                ...dates.map((date) {
-                  final attendance = dateAttendanceMap[date];
+                ...timetableColumns.map((col) {
+                  final attendance = col.attendance;
                   String status = '';
                   Color statusColor = Colors.transparent;
-                  
                   if (attendance != null) {
-                    final attendanceMap = Map<String, String>.from(attendance['data']['attendance'] ?? {});
+                    final attendanceMap = Map<String, String>.from((attendance['data'] as Map<String, dynamic>)['attendance'] ?? {});
                     status = attendanceMap[studentId] ?? '';
-                    
                     switch (status) {
                       case 'hadir':
                         statusColor = Colors.green.shade100;
@@ -829,7 +1087,6 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                         break;
                     }
                   }
-                  
                   return DataCell(
                     Container(
                       width: 30,
@@ -838,9 +1095,11 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                         color: statusColor,
                         borderRadius: BorderRadius.circular(4),
                       ),
+                      alignment: Alignment.center, // Ensure centering
                       child: Center(
                         child: Text(
                           _getStatusInitial(status),
+                          textAlign: TextAlign.center, // Center text horizontally
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: _getStatusColor(status),
@@ -1037,4 +1296,139 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     } catch (_) {}
     return {'kelas': kelas, 'guru': guru};
   }
-} 
+
+  Future<void> _exportToExcel() async {
+    if (_selectedMonth.isEmpty || !_monthlyData.containsKey(_selectedMonth)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tidak ada data untuk diekspor'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+      final monthData = _monthlyData[_selectedMonth]!;
+      final dates = <DateTime>[];
+      final dateAttendanceMap = <DateTime, Map<String, dynamic>>{};
+      for (var attendance in monthData) {
+        final date = attendance['date'] as DateTime;
+        final dayStart = DateTime(date.year, date.month, date.day);
+        if (!dates.contains(dayStart)) {
+          dates.add(dayStart);
+        }
+        dateAttendanceMap[dayStart] = attendance;
+      }
+      dates.sort();
+      final students = <String, String>{};
+      for (var attendance in monthData) {
+        final data = attendance['data'] as Map<String, dynamic>;
+        final studentIds = List<String>.from(data['student_ids'] ?? []);
+        final classId = data['class_id'];
+        if (_selectedClassId != null && classId != _selectedClassId) {
+          continue;
+        }
+        for (var studentId in studentIds) {
+          if (!students.containsKey(studentId)) {
+            final studentName = _studentNames[studentId] ?? 'Unknown';
+            students[studentId] = studentName;
+          }
+        }
+      }
+      final excel = Excel.createExcel();
+      final sheet = excel['Presensi'];
+      List<String> headerRow = ['Nama Siswa'];
+      for (var date in dates) {
+        headerRow.add('${date.day}/${date.month}/${date.year}');
+      }
+      headerRow.addAll(['Sakit', 'Izin', 'Alfa', 'Hadir']);
+      final headerStyle = CellStyle(
+        backgroundColorHex: '#1976D2', // Blue
+        fontColorHex: '#FFFFFF',
+        bold: true,
+        horizontalAlign: HorizontalAlign.Center,
+        fontFamily: getFontFamily(FontFamily.Arial),
+      );
+      // Row styles
+      final rowStyle1 = CellStyle(
+        backgroundColorHex: '#E3F2FD', // Light blue
+        horizontalAlign: HorizontalAlign.Center,
+        fontFamily: getFontFamily(FontFamily.Arial),
+      );
+      final rowStyle2 = CellStyle(
+        backgroundColorHex: '#FFFFFF', // White
+        horizontalAlign: HorizontalAlign.Center,
+        fontFamily: getFontFamily(FontFamily.Arial),
+      );
+      // Write header
+      for (int col = 0; col < headerRow.length; col++) {
+        final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 0));
+        cell.value = headerRow[col];
+
+      }
+      // Data rows
+      int rowIdx = 1;
+      for (var studentEntry in students.entries) {
+        final studentId = studentEntry.key;
+        final studentName = studentEntry.value;
+        int sakitCount = 0, izinCount = 0, alfaCount = 0, hadirCount = 0;
+        final style = rowIdx % 2 == 0 ? rowStyle1 : rowStyle2;
+        // Student name (left aligned)
+        var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIdx));
+        cell.value = studentName;
+        // Attendance per date
+        for (int d = 0; d < dates.length; d++) {
+          final date = dates[d];
+          final attendance = dateAttendanceMap[date];
+          String status = '';
+          if (attendance != null) {
+            final attendanceMap = Map<String, String>.from(attendance['data']['attendance'] ?? {});
+            status = attendanceMap[studentId] ?? '';
+            switch (status) {
+              case 'hadir': hadirCount++; break;
+              case 'sakit': sakitCount++; break;
+              case 'izin': izinCount++; break;
+              case 'alfa': alfaCount++; break;
+            }
+          }
+          var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: d + 1, rowIndex: rowIdx));
+          cell.value = status.isEmpty ? '' : status.toUpperCase();
+          cell.cellStyle = style;
+        }
+        // Totals
+        final totals = [sakitCount, izinCount, alfaCount, hadirCount];
+        for (int t = 0; t < totals.length; t++) {
+          var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: dates.length + 1 + t, rowIndex: rowIdx));
+          cell.value = totals[t];
+          cell.cellStyle = style;
+        }
+        rowIdx++;
+      }
+      for (int col = 0; col < headerRow.length; col++) {
+        sheet.setColAutoFit(col);
+      }
+      final directory = await getTemporaryDirectory();
+      final fileName = 'presensi_${_selectedMonth.replaceAll('-', '_')}.xlsx';
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsBytes(excel.encode()!);
+      Navigator.of(context).pop();
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Data Presensi ${_getMonthDisplay(DateTime.parse('$_selectedMonth-01'))}',
+      );
+    } catch (e) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gagal mengekspor Excel: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
