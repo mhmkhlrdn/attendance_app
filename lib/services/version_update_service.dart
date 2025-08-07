@@ -120,15 +120,16 @@ class VersionUpdateService {
   Future<bool> launchDownloadUrl(String url) async {
     try {
       final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        return await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-      return false;
+
+      // Force launch without checking canLaunchUrl, because GitHub links can fail the check
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (e) {
       print('Error launching download URL: $e');
       return false;
     }
   }
+
+
 
   Future<Map<String, String>> getCurrentVersionInfo() async {
     if (_packageInfo == null) {
@@ -177,7 +178,7 @@ class VersionUpdateInfo {
     required this.newFeatures,
   });
 
-  String get versionString => 'v$latestVersion';
+  String get versionString => '$latestVersion';
   String get currentVersionString => 'v$currentVersion';
   bool get isMajorUpdate {
     final current = currentVersion.split('.');

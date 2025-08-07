@@ -110,7 +110,7 @@ class _VersionUpdateScreenState extends State<VersionUpdateScreen>
 
     try {
       final url = widget.updateInfo.updateUrl!;
-      
+      print(url);
       // Show info about Google Drive links
       if (url.contains('drive.google.com')) {
         if (mounted) {
