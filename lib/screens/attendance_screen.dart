@@ -334,6 +334,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         };
       }).toList();
 
+      // Sort students alphabetically by name (case-insensitive), empty names last
+      studentsList.sort((a, b) {
+        final aName = (a['name'] as String? ?? '').trim();
+        final bName = (b['name'] as String? ?? '').trim();
+        if (aName.isEmpty && bName.isEmpty) return 0;
+        if (aName.isEmpty) return 1;
+        if (bName.isEmpty) return -1;
+        return aName.toLowerCase().compareTo(bName.toLowerCase());
+      });
+
       setState(() {
         students = studentsList;
         isLoading = false;

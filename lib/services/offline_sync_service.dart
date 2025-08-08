@@ -7,7 +7,6 @@ class OfflineSyncService {
   static final ConnectivityService _connectivityService = ConnectivityService();
   static bool _isSyncing = false; // Prevent multiple simultaneous sync operations
 
-  /// Sync pending attendance data when online
   static Future<void> syncPendingAttendance() async {
     // Prevent multiple simultaneous sync operations
     if (_isSyncing) {
@@ -33,42 +32,58 @@ class OfflineSyncService {
 
       // Process each attendance record
       for (var attendanceData in pendingAttendance) {
+        print('Processing attendance: class=${attendanceData['class_id']}, date=${attendanceData['date']}, type=${attendanceData['date'].runtimeType}');
         try {
           // Check if attendance already exists to prevent duplicates
           final existingAttendance = await _checkExistingAttendance(attendanceData);
           if (existingAttendance) {
             print('Attendance already exists for class: ${attendanceData['class_id']}, date: ${attendanceData['date']}. Removing from pending...');
             // Remove this pending record since it already exists
+            final dateValue = attendanceData['date'];
+            String dateString;
+            if (dateValue is DateTime) {
+              dateString = dateValue.toIso8601String();
+            } else if (dateValue is String) {
+              dateString = dateValue;
+            } else {
+              print('Invalid date format for removal: $dateValue');
+              continue;
+            }
             await LocalStorageService.removePendingAttendance(
               attendanceData['schedule_id'] as String,
               attendanceData['teacher_id'] as String,
-              attendanceData['date'] as String,
+              dateString,
             );
             continue;
           }
 
-          // Create a clean copy of the data for Firestore
           final cleanData = Map<String, dynamic>.from(attendanceData);
-          
-          // Remove the local timestamp and add server timestamp
+
           cleanData.remove('local_timestamp');
-          
-          // Convert date string back to DateTime for Firestore
+
           if (cleanData['date'] is String) {
             cleanData['date'] = DateTime.parse(cleanData['date'] as String);
           }
-          
-          // Add server timestamp
+
           cleanData['server_timestamp'] = FieldValue.serverTimestamp();
           
           await _firestore.collection('attendances').add(cleanData);
           print('Successfully synced attendance for class: ${attendanceData['class_id']}');
-          
-          // Remove this specific pending record after successful sync
+
+          final dateValue = attendanceData['date'];
+          String dateString;
+          if (dateValue is DateTime) {
+            dateString = dateValue.toIso8601String();
+          } else if (dateValue is String) {
+            dateString = dateValue;
+          } else {
+            print('Invalid date format for removal: $dateValue');
+            continue;
+          }
           await LocalStorageService.removePendingAttendance(
             attendanceData['schedule_id'] as String,
             attendanceData['teacher_id'] as String,
-            attendanceData['date'] as String,
+            dateString,
           );
         } catch (e) {
           print('Error syncing individual attendance: $e');

@@ -76,7 +76,7 @@ class VersionUpdateService {
   }
 
   Future<Map<String, dynamic>?> _fetchLatestGitHubRelease() async {
-    final url = 'https://api.github.com/repos/mhmkhlrdn/attendance_app/releases/latest';
+    final url = 'https://mhmkhlrdn.github.io/attendance_app/releases/SADESA_1_0_6.apk';
     final response = await http.get(Uri.parse(url));
     if (response.statusCode == 200) {
       return json.decode(response.body);

@@ -169,6 +169,101 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
     }
   }
 
+  Future<void> _clearAllPendingData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear All Pending Data'),
+        content: const Text('This will remove all pending attendance data. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await LocalStorageService.clearPendingAttendance();
+        await _loadPendingData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('All pending data cleared'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error clearing pending data: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _showDebugInfo() async {
+    try {
+      final debugInfo = await OfflineSyncService.getDetailedSyncInfo();
+      
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Debug Information'),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Pending Count: ${debugInfo['pendingCount']}'),
+                  Text('Is Connected: ${debugInfo['isConnected']}'),
+                  Text('Is Syncing: ${debugInfo['isSyncing']}'),
+                  Text('Last Sync: ${debugInfo['lastSync'] ?? 'Never'}'),
+                  const SizedBox(height: 16),
+                  const Text('Pending Details:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...(debugInfo['pendingDetails'] as List<dynamic>).map((detail) => 
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8, top: 4),
+                      child: Text('• ${detail['class_id']} - ${detail['date']} (${detail['student_count']} students)'),
+                    )
+                  ).toList(),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error getting debug info: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   String _formatDateTime(dynamic timestamp) {
     if (timestamp == null) return 'N/A';
     final date = DateTime.tryParse(timestamp.toString());
@@ -187,6 +282,37 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _isLoading ? null : _loadPendingData,
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'clear_pending') {
+                await _clearAllPendingData();
+              } else if (value == 'debug_info') {
+                await _showDebugInfo();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'clear_pending',
+                child: Row(
+                  children: [
+                    Icon(Icons.clear_all, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Clear All Pending'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'debug_info',
+                child: Row(
+                  children: [
+                    Icon(Icons.bug_report, color: Colors.blue),
+                    SizedBox(width: 8),
+                    Text('Debug Info'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),

@@ -339,7 +339,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(
-                                  'Versi 1.0.5',
+                                  'Versi 1.1.0',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.teal.shade700,
