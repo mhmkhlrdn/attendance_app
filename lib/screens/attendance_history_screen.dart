@@ -1088,18 +1088,18 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                     }
                   }
                   return DataCell(
-                    Container(
+                    Center(
+                      child: Container(
                       width: 30,
                       height: 30,
                       decoration: BoxDecoration(
                         color: statusColor,
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      alignment: Alignment.center, // Ensure centering
-                      child: Center(
+                        alignment: Alignment.center,
                         child: Text(
                           _getStatusInitial(status),
-                          textAlign: TextAlign.center, // Center text horizontally
+                          textAlign: TextAlign.center,
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: _getStatusColor(status),
@@ -1110,43 +1110,51 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                   );
                 }).toList(),
                 DataCell(
-                  Text(
+                  Center(
+                    child: Text(
                     sakitCount.toString(),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.orange,
                     ),
                     textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
                 DataCell(
-                  Text(
+                  Center(
+                    child: Text(
                     izinCount.toString(),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.blue,
                     ),
                     textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
                 DataCell(
-                  Text(
+                  Center(
+                    child: Text(
                     alfaCount.toString(),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.red,
                     ),
                     textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
                 DataCell(
-                  Text(
+                  Center(
+                    child: Text(
                     hadirCount.toString(),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.green,
                     ),
                     textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
               ],
@@ -1314,103 +1322,197 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
         builder: (context) => const Center(child: CircularProgressIndicator()),
       );
       final monthData = _monthlyData[_selectedMonth]!;
-      final dates = <DateTime>[];
-      final dateAttendanceMap = <DateTime, Map<String, dynamic>>{};
-      for (var attendance in monthData) {
-        final date = attendance['date'] as DateTime;
-        final dayStart = DateTime(date.year, date.month, date.day);
-        if (!dates.contains(dayStart)) {
-          dates.add(dayStart);
-        }
-        dateAttendanceMap[dayStart] = attendance;
+
+      // Group attendances by class, optionally filtered by selected class
+      final Map<String, List<Map<String, dynamic>>> classToAttendances = {};
+      for (final att in monthData) {
+        final data = att['data'] as Map<String, dynamic>;
+        final clsId = data['class_id'] as String?;
+        if (clsId == null) continue;
+        if (_selectedClassId != null && clsId != _selectedClassId) continue;
+        classToAttendances.putIfAbsent(clsId, () => []).add(att);
       }
-      dates.sort();
-      final students = <String, String>{};
-      for (var attendance in monthData) {
-        final data = attendance['data'] as Map<String, dynamic>;
-        final studentIds = List<String>.from(data['student_ids'] ?? []);
-        final classId = data['class_id'];
-        if (_selectedClassId != null && classId != _selectedClassId) {
-          continue;
-        }
-        for (var studentId in studentIds) {
-          if (!students.containsKey(studentId)) {
-            final studentName = _studentNames[studentId] ?? 'Unknown';
-            students[studentId] = studentName;
+
+      // Helper to sanitize sheet names (Excel sheet name limits)
+      String _sanitizeSheetName(String input) {
+        final sanitized = input
+            .replaceAll('/', '-')
+            .replaceAll('\\', '-')
+            .replaceAll(':', '-')
+            .replaceAll('*', '-')
+            .replaceAll('?', '-')
+            .replaceAll('[', '(')
+            .replaceAll(']', ')')
+            .trim();
+        return sanitized.isEmpty ? 'Sheet' : (sanitized.length > 31 ? sanitized.substring(0, 31) : "Kelas $sanitized");
+      }
+
+      // Resolve class display name by fetching from Firestore classes collection
+      Future<String> _resolveClassDisplayName(String clsId) async {
+        try {
+          // First try to find in cached classes
+          for (final classData in _availableClasses) {
+            if (classData['id'] == clsId) {
+              final name = (classData['name'] as String?)?.trim() ?? '';
+              if (name.isNotEmpty) return name;
+              break;
+            }
           }
+          
+          // Fetch from Firestore classes collection
+          final classDoc = await FirebaseFirestore.instance.collection('classes').doc(clsId).get();
+          print('Fetching class document for ID: $clsId');
+          if (classDoc.exists) {
+            final data = classDoc.data() as Map<String, dynamic>;
+            final grade = (data['grade'] ?? '').toString().trim();
+            final className = (data['class_name'] ?? '').toString().trim();
+            final combined = '$grade $className'.trim();
+            print('Class data: grade="$grade", className="$className", combined="$combined"');
+            if (combined.isNotEmpty) return combined;
+          } else {
+            print('Class document does not exist for ID: $clsId');
+          }
+        } catch (e) {
+          print('Error resolving class name for $clsId: $e');
         }
+        return clsId;
       }
+
       final excel = Excel.createExcel();
-      final sheet = excel['Presensi'];
-      List<String> headerRow = ['Nama Siswa'];
-      for (var date in dates) {
-        headerRow.add('${date.day}/${date.month}/${date.year}');
-      }
-      headerRow.addAll(['Sakit', 'Izin', 'Alfa', 'Hadir']);
+      // Styles (match previous styling)
       final headerStyle = CellStyle(
-        backgroundColorHex: '#1976D2', // Blue
+        backgroundColorHex: '#1976D2',
         fontColorHex: '#FFFFFF',
         bold: true,
         horizontalAlign: HorizontalAlign.Center,
         fontFamily: getFontFamily(FontFamily.Arial),
       );
-      // Row styles
       final rowStyle1 = CellStyle(
-        backgroundColorHex: '#E3F2FD', // Light blue
+        backgroundColorHex: '#E3F2FD',
         horizontalAlign: HorizontalAlign.Center,
         fontFamily: getFontFamily(FontFamily.Arial),
       );
       final rowStyle2 = CellStyle(
-        backgroundColorHex: '#FFFFFF', // White
+        backgroundColorHex: '#FFFFFF',
         horizontalAlign: HorizontalAlign.Center,
         fontFamily: getFontFamily(FontFamily.Arial),
       );
-      // Write header
-      for (int col = 0; col < headerRow.length; col++) {
-        final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 0));
-        cell.value = headerRow[col];
 
-      }
+      for (final entry in classToAttendances.entries) {
+        final clsId = entry.key;
+        final classAttendances = entry.value;
+
+        // Sort attendances by date (ascending)
+        classAttendances.sort((a, b) {
+          final da = a['date'] as DateTime;
+          final db = b['date'] as DateTime;
+          return da.compareTo(db);
+        });
+
+        // Build column definitions: one column per attendance record
+        final columns = classAttendances.map((att) {
+          final data = att['data'] as Map<String, dynamic>;
+          final date = att['date'] as DateTime;
+          final teacherId = data['teacher_id'] as String?;
+          final teacherName = teacherId != null ? (_teacherNames[teacherId] ?? 'Unknown') : 'Unknown';
+          return {
+            'label': '${date.day}/${date.month}/${date.year}',
+            'teacher': teacherName,
+            'attendance': Map<String, String>.from(data['attendance'] ?? {}),
+          };
+        }).toList();
+
+        // Collect all students for this class
+        final Map<String, String> studentsMap = {};
+        for (final att in classAttendances) {
+          final data = att['data'] as Map<String, dynamic>;
+          final ids = List<String>.from(data['student_ids'] ?? []);
+          for (final sid in ids) {
+            studentsMap[sid] = _studentNames[sid] ?? 'Unknown';
+          }
+        }
+
+        // Sort students alphabetically
+        final studentsSorted = studentsMap.entries.toList()
+          ..sort((a, b) {
+            final an = a.value.trim().toLowerCase();
+            final bn = b.value.trim().toLowerCase();
+            if (an.isEmpty && bn.isEmpty) return 0;
+            if (an.isEmpty) return 1;
+            if (bn.isEmpty) return -1;
+            return an.compareTo(bn);
+          });
+
+        // Create a sheet per class
+        final displayName = await _resolveClassDisplayName(clsId);
+        final sheetName = _sanitizeSheetName(displayName);
+        print('Creating sheet: $sheetName for class: $clsId (display name: $displayName)');
+        final sheet = excel[sheetName];
+
+        // Header row: student name + one column per attendance + totals
+        final header = <String>['Nama Siswa', ...columns.map((c) => c['label'] as String), 'Sakit', 'Izin', 'Alfa', 'Hadir'];
+        for (int col = 0; col < header.length; col++) {
+          final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 0));
+          cell.value = header[col];
+          cell.cellStyle = headerStyle;
+        }
+
       // Data rows
       int rowIdx = 1;
-      for (var studentEntry in students.entries) {
-        final studentId = studentEntry.key;
-        final studentName = studentEntry.value;
-        int sakitCount = 0, izinCount = 0, alfaCount = 0, hadirCount = 0;
+        for (final e in studentsSorted) {
+          final studentId = e.key;
+          final studentName = e.value;
+          int sakit = 0, izin = 0, alfa = 0, hadir = 0;
         final style = rowIdx % 2 == 0 ? rowStyle1 : rowStyle2;
-        // Student name (left aligned)
-        var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIdx));
-        cell.value = studentName;
-        // Attendance per date
-        for (int d = 0; d < dates.length; d++) {
-          final date = dates[d];
-          final attendance = dateAttendanceMap[date];
-          String status = '';
-          if (attendance != null) {
-            final attendanceMap = Map<String, String>.from(attendance['data']['attendance'] ?? {});
-            status = attendanceMap[studentId] ?? '';
+
+          sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIdx)).value = studentName;
+          for (int i = 0; i < columns.length; i++) {
+            final attMap = columns[i]['attendance'] as Map<String, String>;
+            final status = attMap[studentId] ?? '';
             switch (status) {
-              case 'hadir': hadirCount++; break;
-              case 'sakit': sakitCount++; break;
-              case 'izin': izinCount++; break;
-              case 'alfa': alfaCount++; break;
+              case 'hadir':
+                hadir++;
+                break;
+              case 'sakit':
+                sakit++;
+                break;
+              case 'izin':
+                izin++;
+                break;
+              case 'alfa':
+                alfa++;
+                break;
             }
+            final dataCell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1 + i, rowIndex: rowIdx));
+            dataCell.value = status.isEmpty ? '' : status.toUpperCase();
+            dataCell.cellStyle = style;
           }
-          var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: d + 1, rowIndex: rowIdx));
-          cell.value = status.isEmpty ? '' : status.toUpperCase();
-          cell.cellStyle = style;
+
+          final totalsStart = 1 + columns.length;
+          final c0 = sheet.cell(CellIndex.indexByColumnRow(columnIndex: totalsStart + 0, rowIndex: rowIdx));
+          c0.value = sakit; c0.cellStyle = style;
+          final c1 = sheet.cell(CellIndex.indexByColumnRow(columnIndex: totalsStart + 1, rowIndex: rowIdx));
+          c1.value = izin; c1.cellStyle = style;
+          final c2 = sheet.cell(CellIndex.indexByColumnRow(columnIndex: totalsStart + 2, rowIndex: rowIdx));
+          c2.value = alfa; c2.cellStyle = style;
+          final c3 = sheet.cell(CellIndex.indexByColumnRow(columnIndex: totalsStart + 3, rowIndex: rowIdx));
+          c3.value = hadir; c3.cellStyle = style;
+
+          rowIdx++;
         }
-        // Totals
-        final totals = [sakitCount, izinCount, alfaCount, hadirCount];
-        for (int t = 0; t < totals.length; t++) {
-          var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: dates.length + 1 + t, rowIndex: rowIdx));
-          cell.value = totals[t];
-          cell.cellStyle = style;
+
+        // Footer: teacher names row at the very bottom
+        rowIdx += 1; // blank row separator
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIdx)).value = 'Guru';
+        for (int i = 0; i < columns.length; i++) {
+          final teacherName = columns[i]['teacher'] as String;
+          sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1 + i, rowIndex: rowIdx)).value = teacherName;
         }
-        rowIdx++;
-      }
-      for (int col = 0; col < headerRow.length; col++) {
-        sheet.setColAutoFit(col);
+
+        // Auto-size columns
+        for (int c = 0; c < header.length; c++) {
+          sheet.setColAutoFit(c);
+        }
       }
       final directory = await getTemporaryDirectory();
       final fileName = 'presensi_${_selectedMonth.replaceAll('-', '_')}.xlsx';

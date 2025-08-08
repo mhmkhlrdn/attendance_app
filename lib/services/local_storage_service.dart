@@ -219,10 +219,12 @@ class LocalStorageService {
 
   /// Remove specific pending attendance record
   static Future<void> removePendingAttendance(String scheduleId, String teacherId, String date) async {
+    print('Attempting to remove pending attendance: scheduleId=$scheduleId, teacherId=$teacherId, date=$date');
     final prefs = await SharedPreferences.getInstance();
     final pendingList = await getPendingAttendance();
     
     final initialCount = pendingList.length;
+    print('Initial pending count: $initialCount');
     
     // Remove the specific attendance record
     pendingList.removeWhere((attendance) {
@@ -230,7 +232,11 @@ class LocalStorageService {
       final attendanceTeacherId = attendance['teacher_id'] as String?;
       final attendanceDate = attendance['date'];
       
+      print('Checking attendance: scheduleId=$attendanceScheduleId, teacherId=$attendanceTeacherId, date=$attendanceDate');
+      print('Target: scheduleId=$scheduleId, teacherId=$teacherId, date=$date');
+      
       if (attendanceScheduleId != scheduleId || attendanceTeacherId != teacherId) {
+        print('Schedule or teacher ID mismatch');
         return false;
       }
       
@@ -241,16 +247,23 @@ class LocalStorageService {
       } else if (attendanceDate is String) {
         attendanceDateString = attendanceDate.split('T')[0]; // Get just the date part
       } else {
+        print('Invalid attendance date type: ${attendanceDate.runtimeType}');
         return false;
       }
       
       final targetDateString = date.split('T')[0];
-      return attendanceDateString == targetDateString;
+      print('Date comparison: attendanceDateString=$attendanceDateString, targetDateString=$targetDateString');
+      final matches = attendanceDateString == targetDateString;
+      print('Date match: $matches');
+      return matches;
     });
     
     final finalCount = pendingList.length;
+    print('Final pending count: $finalCount');
     if (initialCount != finalCount) {
       print('Removed ${initialCount - finalCount} pending attendance record(s)');
+    } else {
+      print('No records were removed - possible matching issue');
     }
     
     // Convert DateTime objects back to strings before saving
