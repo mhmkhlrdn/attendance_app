@@ -543,9 +543,7 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
 
   Future<void> _exportToXLSX(List<Map<String, dynamic>> data) async {
     final excelFile = excel.Excel.createExcel();
-    
-    // Remove default sheet
-    excelFile.delete('Sheet1');
+    // Keep default sheet; we'll create class sheets as needed
     
     // Group data by class
     Map<String, List<Map<String, dynamic>>> classSections = {};
@@ -665,9 +663,19 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
       );
     }
     
-    // Save file
+    // Save file with clear naming
+    String _slugify(String? s) => (s ?? '')
+        .replaceAll(RegExp(r"[\\/:*?\<>|]"), '')
+        .replaceAll(RegExp(r"\s+"), '_');
+    String _nowStamp() {
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      return '${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}';
+    }
     final dir = await getApplicationDocumentsDirectory();
-    final fileName = 'arsip_data_${_selectedYearName?.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+    final schoolSlug = _slugify(_schoolName ?? 'Sekolah');
+    final yearSlug = _slugify(_selectedYearName);
+    final fileName = '${schoolSlug}_Arsip_${yearSlug}_${_nowStamp()}.xlsx';
     final file = File('${dir.path}/$fileName');
     
     final bytes = excelFile.save();

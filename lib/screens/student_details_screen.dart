@@ -582,8 +582,7 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
   Future<void> _exportToXLSX() async {
     final excelFile = excel.Excel.createExcel();
     
-    // Remove default sheet
-    excelFile.delete('Sheet1');
+    // Keep default sheet; we'll use a dedicated sheet and leave defaults intact
     
     // Create student details sheet
     final sheet = excelFile['Detail Siswa'];
@@ -687,8 +686,18 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
     }
     
     // Save file
+    String _slugify(String? s) => (s ?? '')
+        .replaceAll(RegExp(r"[\\/:*?\<>|]"), '')
+        .replaceAll(RegExp(r"\s+"), '_');
+    String _nowStamp() {
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      return '${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}';
+    }
     final dir = await getApplicationDocumentsDirectory();
-    final fileName = 'detail_siswa_${_studentData!['name']?.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+    final schoolSlug = _slugify(_schoolName ?? 'Sekolah');
+    final studentSlug = _slugify(_studentData!['name']);
+    final fileName = '${schoolSlug}_Detail_Siswa_${studentSlug}_${_nowStamp()}.xlsx';
     final file = File('${dir.path}/$fileName');
     
     final bytes = excelFile.save();
@@ -849,8 +858,18 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
     );
     
     final bytes = await pdf.save();
+    String _slugify(String? s) => (s ?? '')
+        .replaceAll(RegExp(r"[\\/:*?\<>|]"), '')
+        .replaceAll(RegExp(r"\s+"), '_');
+    String _nowStamp() {
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      return '${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}';
+    }
     final dir = await getApplicationDocumentsDirectory();
-    final fileName = 'detail_siswa_${_studentData!['name']?.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+    final schoolSlug = _slugify(_schoolName ?? 'Sekolah');
+    final studentSlug = _slugify(_studentData!['name']);
+    final fileName = '${schoolSlug}_Detail_Siswa_${studentSlug}_${_nowStamp()}.pdf';
     final file = File('${dir.path}/$fileName');
     await file.writeAsBytes(bytes);
     
