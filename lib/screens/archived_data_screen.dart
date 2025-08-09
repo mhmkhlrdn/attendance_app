@@ -5,6 +5,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:excel/excel.dart' as excel;
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'student_details_screen.dart';
 import 'dart:io';
 import 'dart:convert';
@@ -29,6 +31,8 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
     super.initState();
     _loadLatestYear();
     _loadSchoolName();
+    // Initialize Indonesian locale for any date texts in exports
+    initializeDateFormatting('id_ID', null);
   }
 
   Future<void> _loadLatestYear() async {
@@ -760,7 +764,7 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Text(
-                'Dibuat pada: ${DateTime.now().day.toString().padLeft(2, '0')}/${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().year}',
+                'Dibuat pada: ${DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(DateTime.now())}',
                 style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
               ),
               pw.Text(

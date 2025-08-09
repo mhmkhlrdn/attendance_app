@@ -7,6 +7,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'advanced_report_screen.dart';
 import 'package:excel/excel.dart' as excel;
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 class AttendanceReportScreen extends StatefulWidget {
   final Map<String, String> userInfo;
@@ -25,14 +27,14 @@ class AttendanceReportScreen extends StatefulWidget {
 class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   String? _selectedClassId;
   DateTime? _selectedDate;
-  String _reportType = 'daily'; // 'daily', 'monthly', 'yearly'
+  String _reportType = 'daily';
   List<QueryDocumentSnapshot>? _classes;
   bool _isExporting = false;
   String? _schoolName;
-  final Set<String> _selectedStatuses = <String>{}; // 'hadir','sakit','izin','alfa'
+  final Set<String> _selectedStatuses = <String>{};
   String _sortByStatus = 'hadir';
   bool _sortDescending = true;
-  bool _rankingEnabled = true;
+  bool _rankingEnabled = false;
 
   String _slugify(String? input) {
     final s = (input ?? '').trim();
@@ -53,6 +55,8 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
     super.initState();
     _fetchClasses();
     _loadSchoolName();
+    // Initialize Indonesian locale for month/day names in exports
+    initializeDateFormatting('id_ID', null);
   }
 
   Future<void> _loadSchoolName() async {
@@ -119,7 +123,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
     }
     
     try {
-      final snapshot = await query.get();
+    final snapshot = await query.get();
       // If monthly/yearly selected and no data returned, fallback to client-side filter
       if ((_reportType == 'monthly' || _reportType == 'yearly') && _selectedDate != null && snapshot.docs.isEmpty) {
         // Fallback: fetch by equality filters only, then filter in memory
@@ -141,7 +145,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         }).toList();
         return docs;
       }
-      return snapshot.docs;
+    return snapshot.docs;
     } catch (e) {
       // Absolute fallback on any error
       Query fb = FirebaseFirestore.instance
@@ -178,20 +182,18 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       // Create PDF document
       final pdf = pw.Document();
       
-      // Get report period string with proper null checking
+      // Get report period string with Indonesian day/month names
       String getReportPeriod() {
         if (_selectedDate == null) return 'Semua Periode';
         switch (_reportType) {
           case 'daily':
-            return '${_selectedDate!.day.toString().padLeft(2, '0')}/${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}';
+            return DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(_selectedDate!);
           case 'monthly':
-            final months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-                          'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-            return '${months[_selectedDate!.month - 1]} ${_selectedDate!.year}';
+            return DateFormat('MMMM yyyy', 'id_ID').format(_selectedDate!);
           case 'yearly':
-            return 'Tahun ${_selectedDate!.year}';
+            return 'Tahun ${DateFormat('yyyy', 'id_ID').format(_selectedDate!)}';
           default:
-            return '${_selectedDate!.day.toString().padLeft(2, '0')}/${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}';
+            return DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(_selectedDate!);
         }
       }
       
@@ -262,10 +264,40 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
             : '${cd['grade'] ?? ''} ${cd['class_name'] ?? ''}'.trim();
       });
 
+      // Prefetch teachers by documentId
       await _prefetchCollection('teachers', teacherIds, (d) {
         final td = d.data() as Map<String, dynamic>;
-        teacherIdToName[d.id] = (td['name'] ?? d.id).toString();
+        final teacherName = (td['name'] ?? d.id).toString();
+        teacherIdToName[d.id] = teacherName;
+        // Also map by NUPTK if present so lookups by nuptk work too
+        final nuptk = (td['nuptk'] ?? '').toString();
+        if (nuptk.isNotEmpty) {
+          teacherIdToName[nuptk] = teacherName;
+        }
       });
+
+      // Prefetch teachers by NUPTK as well, for cases where attendance stores NUPTK instead of teacher doc ID
+      if (teacherIds.isNotEmpty) {
+        const int chunk = 10;
+        final idList = teacherIds.toList();
+        for (int i = 0; i < idList.length; i += chunk) {
+          final part = idList.sublist(i, (i + chunk > idList.length) ? idList.length : i + chunk);
+          final snap = await FirebaseFirestore.instance
+              .collection('teachers')
+              .where('nuptk', whereIn: part)
+              .get();
+          for (final d in snap.docs) {
+            final td = d.data() as Map<String, dynamic>;
+            final teacherName = (td['name'] ?? d.id).toString();
+            final nuptk = (td['nuptk'] ?? '').toString();
+            if (nuptk.isNotEmpty) {
+              teacherIdToName[nuptk] = teacherName;
+            }
+            // Keep docId mapping as well just in case
+            teacherIdToName[d.id] = teacherName;
+          }
+        }
+      }
 
       await _prefetchCollection('students', studentIds, (d) {
         final sd = d.data() as Map<String, dynamic>;
@@ -274,19 +306,18 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       
       String _formatPeriodCell(DateTime? dt) {
         if (dt == null) return '-';
-        String two(int n) => n.toString().padLeft(2, '0');
         switch (_reportType) {
           case 'daily':
-            return '${two(dt.day)}/${two(dt.month)}/${dt.year}';
+            return DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(dt);
           case 'monthly':
-            return '${two(dt.month)}/${dt.year}';
+            return DateFormat('MMMM yyyy', 'id_ID').format(dt);
           case 'yearly':
-            return '${dt.year}';
+            return DateFormat('yyyy', 'id_ID').format(dt);
           default:
-            return '${two(dt.day)}/${two(dt.month)}/${dt.year}';
+            return DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(dt);
         }
       }
-
+      
       for (final doc in records) {
         final data = doc.data() as Map<String, dynamic>;
         final date = (data['date'] as Timestamp?)?.toDate();
@@ -432,7 +463,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
                 pw.Text(
-                  'Dibuat pada: ${DateTime.now().day.toString().padLeft(2, '0')}/${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().year} ${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}',
+              'Dibuat pada: ${DateFormat('EEEE, dd MMMM yyyy HH:mm', 'id_ID').format(DateTime.now())}',
                   style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
                 ),
                 pw.Text(
@@ -536,47 +567,47 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
             // Student Ranking Section
             if (_rankingEnabled && rankingEntries.isNotEmpty) ...[
               pw.SizedBox(height: 25),
-              pw.Text(
+            pw.Text(
                 'Peringkat Siswa berdasarkan status "${_sortByStatus.toUpperCase()}"',
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.blue800,
-                ),
+              style: pw.TextStyle(
+                fontSize: 18,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.blue800,
               ),
-              pw.SizedBox(height: 12),
-              pw.Container(
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: PdfColors.grey300, width: 1),
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Container(
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey300, width: 1),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+              ),
+              child: pw.Table(
+                border: pw.TableBorder.symmetric(
+                  inside: pw.BorderSide(color: PdfColors.grey200, width: 0.5),
                 ),
-                child: pw.Table(
-                  border: pw.TableBorder.symmetric(
-                    inside: pw.BorderSide(color: PdfColors.grey200, width: 0.5),
-                  ),
-                  children: [
-                    pw.TableRow(
-                      decoration: const pw.BoxDecoration(color: PdfColors.grey100),
-                      children: [
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColors.grey100),
+                    children: [
                         _buildTableHeader('No', fontSize: 9),
-                        _buildTableHeader('Siswa', fontSize: 9),
+                      _buildTableHeader('Siswa', fontSize: 9),
                         _buildTableHeader('Jumlah ${_sortByStatus.toUpperCase()}', fontSize: 9),
-                      ],
-                    ),
+                    ],
+                  ),
                     ...List.generate(rankingEntries.length, (i) => i).map((i) {
                       final entry = rankingEntries[i];
                       final studentName = studentIdToName[entry.key] ?? entry.key;
                       return pw.TableRow(
-                        children: [
+                    children: [
                           _buildTableCell('${i + 1}', fontSize: 9),
                           _buildTableCell(studentName, fontSize: 9),
                           _buildTableCell('${entry.value}', fontSize: 9, isBold: true),
                         ],
                       );
                     }).toList(),
-                  ],
-                ),
+                ],
               ),
+            ),
             ],
 
             // Detailed Records Section grouped by date and class
@@ -644,8 +675,20 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         final classData = classDoc.data() as Map<String, dynamic>?;
         final className = classData != null ? '${classData['grade'] ?? ''} ${classData['class_name'] ?? ''}'.trim() : classId;
 
-        final teacherQuery = await FirebaseFirestore.instance.collection('teachers').where('nuptk', isEqualTo: teacherId).limit(1).get();
-        final teacherName = teacherQuery.docs.isNotEmpty ? teacherQuery.docs.first['name'] ?? teacherId : teacherId;
+        // Resolve teacher name by either doc id or nuptk
+        String teacherName;
+        try {
+          final tDoc = await FirebaseFirestore.instance.collection('teachers').doc(teacherId).get();
+          if (tDoc.exists) {
+            final td = tDoc.data() as Map<String, dynamic>?;
+            teacherName = (td?['name'] ?? teacherId).toString();
+          } else {
+            final tq = await FirebaseFirestore.instance.collection('teachers').where('nuptk', isEqualTo: teacherId).limit(1).get();
+            teacherName = tq.docs.isNotEmpty ? (tq.docs.first.data()['name'] ?? teacherId).toString() : teacherId;
+          }
+        } catch (_) {
+          teacherName = teacherId;
+        }
 
         classStats.putIfAbsent(className, () => {'hadir': 0, 'sakit': 0, 'izin': 0, 'alfa': 0, 'total': 0});
 
@@ -856,10 +899,10 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       final period = (_selectedDate == null)
           ? 'Semua Periode'
           : (_reportType == 'daily'
-              ? '${_selectedDate!.day.toString().padLeft(2, '0')}/${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}'
+              ? DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(_selectedDate!)
               : _reportType == 'monthly'
-                  ? '${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}'
-                  : 'Tahun ${_selectedDate!.year}');
+                  ? DateFormat('MMMM yyyy', 'id_ID').format(_selectedDate!)
+                  : 'Tahun ${DateFormat('yyyy', 'id_ID').format(_selectedDate!)}');
       final kelas = (_selectedClassId == null || _selectedClassId!.isEmpty)
           ? 'Semua Kelas'
           : (() {
@@ -1268,146 +1311,146 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
 
                               // Class and Date Selectors (stacked to take full width)
                               Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Kelas',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      border: Border.all(color: Colors.grey[300]!),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: DropdownButtonFormField<String>(
-                                      isExpanded: true,
-                                      value: _selectedClassId,
-                                      decoration: const InputDecoration(
-                                        border: InputBorder.none,
-                                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                      ),
-                                      items: [
-                                        const DropdownMenuItem(
-                                          value: '',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.class_, size: 18),
-                                              SizedBox(width: 8),
-                                              Text('Semua Kelas'),
-                                            ],
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Kelas',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey,
                                           ),
                                         ),
-                                        ...(_classes ?? []).map((doc) {
-                                          final data = doc.data() as Map<String, dynamic>;
-                                          final label = '${data['grade'] ?? ''} ${data['class_name'] ?? ''}'.trim();
-                                          return DropdownMenuItem(
-                                            value: doc.id,
-                                            child: Text(label),
-                                          );
-                                        }).toList()
-                                          ..sort((a, b) {
-                                            if (a.value == '') return -1;
-                                            if (b.value == '') return 1;
-                                            return ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? '');
-                                          }),
-                                      ],
-                                      onChanged: (v) => setState(() => _selectedClassId = v == '' ? null : v),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    _reportType == 'daily'
-                                        ? 'Tanggal'
-                                        : _reportType == 'monthly'
-                                            ? 'Bulan'
-                                            : 'Tahun',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  InkWell(
-                                    onTap: () async {
-                                      DateTime? initialDate;
-                                      DateTime? firstDate;
-                                      DateTime? lastDate;
-
-                                      switch (_reportType) {
-                                        case 'daily':
-                                          initialDate = _selectedDate ?? DateTime.now();
-                                          firstDate = DateTime(2020);
-                                          lastDate = DateTime.now().add(const Duration(days: 365));
-                                          break;
-                                        case 'monthly':
-                                          initialDate = _selectedDate ?? DateTime.now();
-                                          firstDate = DateTime(2020, 1);
-                                          lastDate = DateTime.now();
-                                          break;
-                                        case 'yearly':
-                                          initialDate = _selectedDate ?? DateTime.now();
-                                          firstDate = DateTime(2020);
-                                          lastDate = DateTime.now();
-                                          break;
-                                      }
-
-                                      final picked = await showDatePicker(
-                                        context: context,
-                                        initialDate: initialDate!,
-                                        firstDate: firstDate!,
-                                        lastDate: lastDate!,
-                                        initialDatePickerMode: _reportType == 'yearly'
-                                            ? DatePickerMode.year
-                                            : _reportType == 'monthly'
-                                                ? DatePickerMode.year
-                                                : DatePickerMode.day,
-                                      );
-                                      if (picked != null) setState(() => _selectedDate = picked);
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                      decoration: BoxDecoration(
-                                        border: Border.all(color: Colors.grey[300]!),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.calendar_today,
-                                            size: 18,
-                                            color: Colors.grey[600],
+                                        const SizedBox(height: 8),
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            border: Border.all(color: Colors.grey[300]!),
+                                            borderRadius: BorderRadius.circular(12),
                                           ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              _selectedDate == null
-                                                  ? _reportType == 'daily'
-                                                      ? 'Semua Tanggal'
-                                                      : _reportType == 'monthly'
-                                                          ? 'Semua Bulan'
-                                                          : 'Semua Tahun'
-                                                  : _reportType == 'daily'
-                                                      ? '${_selectedDate!.day.toString().padLeft(2, '0')}/${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}'
-                                                      : _reportType == 'monthly'
-                                                          ? '${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}'
-                                                          : '${_selectedDate!.year}',
-                                              style: TextStyle(
-                                                color: _selectedDate == null ? Colors.grey[500] : Colors.black,
+                                          child: DropdownButtonFormField<String>(
+                                            isExpanded: true,
+                                            value: _selectedClassId,
+                                            decoration: const InputDecoration(
+                                              border: InputBorder.none,
+                                              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                            ),
+                                            items: [
+                                              const DropdownMenuItem(
+                                                value: '',
+                                                child: Row(
+                                                  children: [
+                                                    Icon(Icons.class_, size: 18),
+                                                    SizedBox(width: 8),
+                                                    Text('Semua Kelas'),
+                                                  ],
+                                                ),
                                               ),
+                                              ...(_classes ?? []).map((doc) {
+                                                final data = doc.data() as Map<String, dynamic>;
+                                                final label = '${data['grade'] ?? ''} ${data['class_name'] ?? ''}'.trim();
+                                                return DropdownMenuItem(
+                                                  value: doc.id,
+                                                  child: Text(label),
+                                                );
+                                                                                              }).toList()
+                                                  ..sort((a, b) {
+                                                    if (a.value == '') return -1;
+                                                    if (b.value == '') return 1;
+                                                    return ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? '');
+                                                  }),
+                                            ],
+                                            onChanged: (v) => setState(() => _selectedClassId = v == '' ? null : v),
+                                          ),
+                                        ),
+                                  const SizedBox(height: 16),
+                                        Text(
+                                          _reportType == 'daily'
+                                              ? 'Tanggal'
+                                              : _reportType == 'monthly'
+                                                  ? 'Bulan'
+                                                  : 'Tahun',
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        InkWell(
+                                          onTap: () async {
+                                            DateTime? initialDate;
+                                            DateTime? firstDate;
+                                            DateTime? lastDate;
+
+                                            switch (_reportType) {
+                                              case 'daily':
+                                                initialDate = _selectedDate ?? DateTime.now();
+                                                firstDate = DateTime(2020);
+                                                lastDate = DateTime.now().add(const Duration(days: 365));
+                                                break;
+                                              case 'monthly':
+                                                initialDate = _selectedDate ?? DateTime.now();
+                                                firstDate = DateTime(2020, 1);
+                                                lastDate = DateTime.now();
+                                                break;
+                                              case 'yearly':
+                                                initialDate = _selectedDate ?? DateTime.now();
+                                                firstDate = DateTime(2020);
+                                                lastDate = DateTime.now();
+                                                break;
+                                            }
+
+                                            final picked = await showDatePicker(
+                                              context: context,
+                                              initialDate: initialDate!,
+                                              firstDate: firstDate!,
+                                              lastDate: lastDate!,
+                                              initialDatePickerMode: _reportType == 'yearly'
+                                                  ? DatePickerMode.year
+                                                  : _reportType == 'monthly'
+                                                      ? DatePickerMode.year
+                                                      : DatePickerMode.day,
+                                            );
+                                            if (picked != null) setState(() => _selectedDate = picked);
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: Colors.grey[300]!),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.calendar_today,
+                                                  size: 18,
+                                                  color: Colors.grey[600],
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    _selectedDate == null
+                                                        ? _reportType == 'daily'
+                                                            ? 'Semua Tanggal'
+                                                            : _reportType == 'monthly'
+                                                                ? 'Semua Bulan'
+                                                                : 'Semua Tahun'
+                                                        : _reportType == 'daily'
+                                                            ? '${_selectedDate!.day.toString().padLeft(2, '0')}/${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}'
+                                                            : _reportType == 'monthly'
+                                                                ? '${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}'
+                                                                : '${_selectedDate!.year}',
+                                                    style: TextStyle(
+                                                      color: _selectedDate == null ? Colors.grey[500] : Colors.black,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ],
-                              ),
 
                               const SizedBox(height: 16),
 
@@ -1439,12 +1482,11 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                                           }
                                         });
                                       },
-                                    ),
+                                  ),
                                 ],
                               ),
 
                               const SizedBox(height: 12),
-                              // Sort controls (stacked full width)
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -1528,7 +1570,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                       // Data Preview Section
                       FutureBuilder<List<QueryDocumentSnapshot>>(
                           future: _fetchAttendanceRecords(),
-                        builder: (context, snapshot) {
+                          builder: (context, snapshot) {
                             if (snapshot.connectionState == ConnectionState.waiting) {
                               return const Center(
                                 child: Column(
@@ -1573,7 +1615,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                               );
                             }
 
-                             final records = snapshot.data!;
+                            final records = snapshot.data!;
 
                             // Calculate statistics reflecting selected status filters
                             int hadir = 0, sakit = 0, izin = 0, alfa = 0;
@@ -1594,7 +1636,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                               }
                             }
 
-                              return Column(
+                            return Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                  // Statistics Cards (reflect status filters immediately)
@@ -1694,7 +1736,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                               ],
                             );
                           },
-                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1728,7 +1770,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                                       Navigator.pop(context);
                                       // Ensure state shows loading spinner
                                       setState(() => _isExporting = true);
-                                      await _exportToPDF(records);
+                      await _exportToPDF(records);
                                     },
                                   ),
                                   ListTile(

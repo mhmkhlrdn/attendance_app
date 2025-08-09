@@ -169,8 +169,8 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
                           value: doc.id,
                           child: Text(data['name'] ?? doc.id),
                         );
-                      }).toList()
-                        ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
+                                              }).toList()
+                          ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
                       return DropdownButtonFormField<String>(
                         value: _selectedYearId,
                         items: yearOptions,

@@ -310,49 +310,49 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                         return const SizedBox.shrink();
                       }
                       Query classesQuery = FirebaseFirestore.instance
-                          .collection('classes')
-                          .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
+                        .collection('classes')
+                        .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
                           .where('year_id', isEqualTo: latestYearId);
                       return StreamBuilder<QuerySnapshot>(
                         stream: classesQuery.snapshots(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-                          final classes = snapshot.data!.docs;
-                          final classOptions = classes.map((doc) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            final grade = data['grade'] ?? '';
-                            final className = data['class_name'] ?? '';
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final classes = snapshot.data!.docs;
+                      final classOptions = classes.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final grade = data['grade'] ?? '';
+                        final className = data['class_name'] ?? '';
 
-                            String label;
-                            if (className.trim() == '' || className == ' ') {
+                        String label;
+                        if (className.trim() == '' || className == ' ') {
                               label = grade;
-                            } else {
-                              label = '$grade$className';
-                            }
+                        } else {
+                          label = '$grade$className';
+                        }
 
-                            return DropdownMenuItem<String>(
-                              value: label,
-                              child: Text(label),
-                            );
-                          }).toList()
-                            ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
+                        return DropdownMenuItem<String>(
+                          value: label,
+                          child: Text(label),
+                        );
+                      }).toList()
+                        ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
 
-                          return DropdownButtonFormField<String>(
-                            isExpanded: true,
+                      return DropdownButtonFormField<String>(
+                        isExpanded: true,
                             value: _classController.text.isNotEmpty ? _classController.text : null,
-                            items: classOptions,
-                            onChanged: (value) {
-                              setState(() {
-                                _classController.text = value ?? '';
-                              });
-                            },
-                            decoration: InputDecoration(
-                              labelText: 'Kelas *',
+                        items: classOptions,
+                        onChanged: (value) {
+                          setState(() {
+                            _classController.text = value ?? '';
+                          });
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Kelas *',
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                              prefixIcon: const Icon(Icons.class_outlined),
-                            ),
+                          prefixIcon: const Icon(Icons.class_outlined),
+                        ),
                             validator: (value) => value == null || value.isEmpty ? 'Pilih kelas' : null,
                           );
                         },

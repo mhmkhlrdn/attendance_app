@@ -628,7 +628,7 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
     );
     
     // Attendance table headers
-    final headers = ['No', 'Tanggal', 'Status', 'Keterangan'];
+    final headers = ['No', 'Tanggal (Hari, DD MMMM YYYY)', 'Status', 'Keterangan'];
     for (int i = 0; i < headers.length; i++) {
       final headerCell = sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 10));
       headerCell.value = headers[i];
@@ -653,7 +653,7 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
       
       final rowData = [
         (i + 1).toString(),
-        date != null ? DateFormat('dd/MM/yyyy').format(date.toDate()) : '',
+        date != null ? DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(date.toDate()) : '',
         _getAttendanceStatusDisplay(attendance['status'] ?? ''),
         attendance['notes'] ?? '',
       ];
@@ -759,7 +759,7 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Text(
-                'Dibuat pada: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}',
+                'Dibuat pada: ${DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(DateTime.now())}',
                 style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
               ),
               pw.Text(
@@ -844,7 +844,7 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
                     children: [
                       _buildPDFTableCell((index + 1).toString()),
                       _buildPDFTableCell(
-                        date != null ? DateFormat('dd/MM/yyyy').format(date.toDate()) : '',
+                        date != null ? DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(date.toDate()) : '',
                       ),
                       _buildPDFTableCell(_getAttendanceStatusDisplay(attendance['status'] ?? '')),
                       _buildPDFTableCell(attendance['notes'] ?? ''),

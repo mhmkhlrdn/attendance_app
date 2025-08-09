@@ -63,16 +63,16 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
 
   void _checkForUpdates() {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
         content: const Text('Pemeriksaan pembaruan dinonaktifkan'),
         backgroundColor: Colors.blueGrey.shade600,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      ),
-    );
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
   }
 
   // void _debugVersionCheck() async {
@@ -237,9 +237,9 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
               child: Column(
                 children: [
                   Expanded(
-                    child: ListView(
-                      padding: EdgeInsets.zero,
-                      children: [
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
                 UserAccountsDrawerHeader(
                   accountName: Text(
                     widget.userInfo['name'] ?? '-',
@@ -356,7 +356,7 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                   title: const Text('Keluar'),
                   onTap: _logout,
                 ),
-                      ],
+              ],
                     ),
                   ),
                   const Padding(

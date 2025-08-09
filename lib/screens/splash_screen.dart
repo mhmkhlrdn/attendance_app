@@ -138,7 +138,7 @@ class _SplashScreenState extends State<SplashScreen>
   void _navigateToNextScreen() {
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
-        _navigateToMainScreen();
+          _navigateToMainScreen();
       }
     });
   }
@@ -305,7 +305,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(
-                                  'Versi 1.2.3',
+                                  'Versi 1.2.5',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.teal.shade700,
