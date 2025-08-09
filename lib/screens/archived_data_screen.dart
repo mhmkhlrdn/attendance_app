@@ -4,6 +4,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:excel/excel.dart' as excel;
+import 'student_details_screen.dart';
 import 'dart:io';
 import 'dart:convert';
 
@@ -18,6 +20,7 @@ class ArchivedDataScreen extends StatefulWidget {
 class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
   String? _selectedYearId;
   String? _selectedYearName;
+  String? _schoolName;
   bool _isExporting = false;
   List<Map<String, dynamic>> _cachedClassData = [];
 
@@ -25,6 +28,7 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
   void initState() {
     super.initState();
     _loadLatestYear();
+    _loadSchoolName();
   }
 
   Future<void> _loadLatestYear() async {
@@ -39,6 +43,25 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
         _selectedYearId = doc.id;
         _selectedYearName = (data['name'] ?? doc.id).toString();
       });
+    }
+  }
+
+  Future<void> _loadSchoolName() async {
+    if (widget.userInfo['school_id'] != null) {
+      try {
+        final schoolDoc = await FirebaseFirestore.instance
+            .collection('schools')
+            .doc(widget.userInfo['school_id'])
+            .get();
+        
+        if (schoolDoc.exists) {
+          setState(() {
+            _schoolName = schoolDoc.data()?['name'] ?? 'Sekolah';
+          });
+        }
+      } catch (e) {
+        print('Error loading school name: $e');
+      }
     }
   }
 
@@ -371,6 +394,23 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
                                                                     fontWeight: FontWeight.w500,
                                                                   ),
                                                                 ),
+                                                                trailing: Icon(
+                                                                  Icons.arrow_forward_ios,
+                                                                  size: 16,
+                                                                  color: Colors.grey[400],
+                                                                ),
+                                                                onTap: () {
+                                                                  Navigator.push(
+                                                                    context,
+                                                                    MaterialPageRoute(
+                                                                      builder: (context) => StudentDetailsScreen(
+                                                                        studentId: sdoc.id,
+                                                                        userInfo: widget.userInfo,
+                                                                        selectedYear: _selectedYearName ?? '',
+                                                                      ),
+                                                                    ),
+                                                                  );
+                                                                },
                                                               );
                                                             }).toList(),
                                                           ),
@@ -474,7 +514,7 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
               'Nama Siswa': studentData['name'] ?? '',
               'Jenis Kelamin': studentData['gender'] ?? '',
               'Status': _getStatusDisplay(studentData['status']),
-              'No. HP Orang Tua': studentData['parent_phone'] ?? '',
+              // Removed parent phone from export
               'Tahun Ajaran': _selectedYearName ?? '',
             });
           }
@@ -482,7 +522,7 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
       }
       
       if (format == 'excel') {
-        await _exportToCSV(exportData);
+        await _exportToXLSX(exportData);
       } else if (format == 'pdf') {
         await _exportToPDF(exportData);
       }
@@ -501,31 +541,161 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
     }
   }
 
-  Future<void> _exportToCSV(List<Map<String, dynamic>> data) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final fileName = 'arsip_data_${_selectedYearName?.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.csv';
-    final file = File('${dir.path}/$fileName');
+  Future<void> _exportToXLSX(List<Map<String, dynamic>> data) async {
+    final excelFile = excel.Excel.createExcel();
     
-    StringBuffer csv = StringBuffer();
-    if (data.isNotEmpty) {
-      // Header
-      csv.writeln(data.first.keys.join(','));
-      // Data rows
-      for (final row in data) {
-        csv.writeln(row.values.map((v) => '"${v.toString()}"').join(','));
+    // Remove default sheet
+    excelFile.delete('Sheet1');
+    
+    // Group data by class
+    Map<String, List<Map<String, dynamic>>> classSections = {};
+    for (final item in data) {
+      final className = item['Kelas'] as String;
+      if (!classSections.containsKey(className)) {
+        classSections[className] = [];
       }
+      classSections[className]!.add(item);
     }
     
-    await file.writeAsString(csv.toString());
-    await Share.shareXFiles([XFile(file.path)], text: 'Data Arsip ${_selectedYearName}');
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Data berhasil diekspor ke CSV!'),
-          backgroundColor: Colors.green,
-        ),
+    // Create a sheet for each class
+    for (final className in classSections.keys) {
+      final sheet = excelFile[className];
+      final classData = classSections[className]!;
+      
+      // School name header (row 1)
+      final schoolCell = sheet.cell(excel.CellIndex.indexByString('A1'));
+      schoolCell.value = _schoolName ?? 'Sekolah';
+      schoolCell.cellStyle = excel.CellStyle(
+        bold: true,
+        fontSize: 18,
+        fontColorHex: 'FF1565C0', // Blue color
       );
+      
+      // School year header (row 2)
+      final yearCell = sheet.cell(excel.CellIndex.indexByString('A2'));
+      yearCell.value = 'Tahun Ajaran: ${_selectedYearName ?? ''}';
+      yearCell.cellStyle = excel.CellStyle(
+        bold: true,
+        fontSize: 16,
+        fontColorHex: 'FF1565C0', // Blue color
+      );
+      
+      // Class name header (row 3)
+      final classCell = sheet.cell(excel.CellIndex.indexByString('A3'));
+      classCell.value = 'Kelas $className';
+      classCell.cellStyle = excel.CellStyle(
+        bold: true,
+        fontSize: 14,
+        fontColorHex: 'FF1976D2', // Blue color
+      );
+      
+      // Table headers (row 5)
+      final headers = ['No', 'Nama Siswa', 'Jenis Kelamin', 'Status'];
+      for (int i = 0; i < headers.length; i++) {
+        final headerCell = sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 4));
+        headerCell.value = headers[i];
+        headerCell.cellStyle = excel.CellStyle(
+          bold: true,
+          fontSize: 12,
+          fontColorHex: 'FFFFFFFF', // White text
+          backgroundColorHex: 'FF1976D2', // Blue background
+          horizontalAlign: excel.HorizontalAlign.Center,
+          verticalAlign: excel.VerticalAlign.Center,
+          leftBorder: excel.Border(borderStyle: excel.BorderStyle.Thin),
+          rightBorder: excel.Border(borderStyle: excel.BorderStyle.Thin),
+          topBorder: excel.Border(borderStyle: excel.BorderStyle.Thin),
+          bottomBorder: excel.Border(borderStyle: excel.BorderStyle.Thin),
+        );
+      }
+      
+      // Student data rows (starting from row 6)
+      for (int i = 0; i < classData.length; i++) {
+        final student = classData[i];
+        final rowIndex = i + 5; // Starting from row 6 (0-indexed)
+        
+        // Row data
+        final rowData = [
+          (i + 1).toString(),
+          student['Nama Siswa'] ?? '',
+          student['Jenis Kelamin'] ?? '',
+          student['Status'] ?? '',
+          // Removed parent phone from export
+        ];
+        
+        for (int j = 0; j < rowData.length; j++) {
+          final cell = sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: j, rowIndex: rowIndex));
+          cell.value = rowData[j];
+          
+          // Alternate row colors
+          final isEvenRow = (i + 1) % 2 == 0;
+          cell.cellStyle = excel.CellStyle(
+            fontSize: 11,
+            horizontalAlign: j == 0 ? excel.HorizontalAlign.Center : excel.HorizontalAlign.Left,
+            verticalAlign: excel.VerticalAlign.Center,
+            backgroundColorHex: isEvenRow ? 'FFF5F5F5' : 'FFFFFFFF', // Light gray and white
+            leftBorder: excel.Border(borderStyle: excel.BorderStyle.Thin, borderColorHex: 'FFE0E0E0'),
+            rightBorder: excel.Border(borderStyle: excel.BorderStyle.Thin, borderColorHex: 'FFE0E0E0'),
+            topBorder: excel.Border(borderStyle: excel.BorderStyle.Thin, borderColorHex: 'FFE0E0E0'),
+            bottomBorder: excel.Border(borderStyle: excel.BorderStyle.Thin, borderColorHex: 'FFE0E0E0'),
+            fontColorHex: _getStatusExcelColor(student['Status']),
+          );
+        }
+      }
+      
+      // Set column widths
+      try {
+        sheet.setColWidth(0, 5.0);   // No
+        sheet.setColWidth(1, 25.0);  // Nama Siswa
+        sheet.setColWidth(2, 15.0);  // Jenis Kelamin
+        sheet.setColWidth(3, 12.0);  // Status
+        // Removed phone column width
+      } catch (e) {
+        // Column width setting may not be available in this version
+        print('Note: Column width setting not available: $e');
+      }
+      
+      // Summary row
+      final summaryRowIndex = classData.length + 6;
+      final summaryCell = sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: summaryRowIndex));
+      summaryCell.value = 'Total Siswa: ${classData.length}';
+      summaryCell.cellStyle = excel.CellStyle(
+        bold: true,
+        fontSize: 12,
+        fontColorHex: 'FF1976D2', // Blue color
+      );
+    }
+    
+    // Save file
+    final dir = await getApplicationDocumentsDirectory();
+    final fileName = 'arsip_data_${_selectedYearName?.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+    final file = File('${dir.path}/$fileName');
+    
+    final bytes = excelFile.save();
+    if (bytes != null) {
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path)], text: 'Data Arsip ${_selectedYearName}');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Data berhasil diekspor ke Excel!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
+  }
+  
+  String _getStatusExcelColor(String? status) {
+    switch (status) {
+      case 'Aktif':
+        return 'FF4CAF50'; // Green
+      case 'Lulus':
+        return 'FF2196F3'; // Blue
+      case 'Tidak Aktif':
+        return 'FFFF9800'; // Orange
+      default:
+        return 'FF000000'; // Black
     }
   }
 
@@ -545,9 +715,9 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(20),
+        margin: const pw.EdgeInsets.all(16),
         header: (context) => pw.Container(
-          padding: const pw.EdgeInsets.only(bottom: 20),
+          padding: const pw.EdgeInsets.only(bottom: 16),
           decoration: const pw.BoxDecoration(
             border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300, width: 1)),
           ),
@@ -555,18 +725,18 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text(
-                'DATA ARSIP SEKOLAH',
+                _schoolName ?? 'SEKOLAH',
                 style: pw.TextStyle(
                   fontSize: 18,
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.blue800,
                 ),
               ),
-              pw.SizedBox(height: 4),
+              pw.SizedBox(height: 3),
               pw.Text(
-                'Tahun Ajaran: ${_selectedYearName ?? ''}',
+                'DATA ARSIP - Tahun Ajaran: ${_selectedYearName ?? ''}',
                 style: pw.TextStyle(
-                  fontSize: 14,
+                  fontSize: 12,
                   color: PdfColors.grey600,
                 ),
               ),
@@ -574,7 +744,7 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
           ),
         ),
         footer: (context) => pw.Container(
-          padding: const pw.EdgeInsets.only(top: 10),
+          padding: const pw.EdgeInsets.only(top: 8),
           decoration: const pw.BoxDecoration(
             border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 1)),
           ),
@@ -583,57 +753,36 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
             children: [
               pw.Text(
                 'Dibuat pada: ${DateTime.now().day.toString().padLeft(2, '0')}/${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().year}',
-                style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
               ),
               pw.Text(
                 'Halaman ${context.pageNumber}',
-                style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+                style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
               ),
             ],
           ),
         ),
         build: (context) => [
           for (final className in classSections.keys) ...[
-            pw.SizedBox(height: 20),
+            pw.SizedBox(height: 16),
             pw.Container(
-              padding: const pw.EdgeInsets.all(12),
+              padding: const pw.EdgeInsets.all(8),
               decoration: pw.BoxDecoration(
                 color: PdfColors.blue50,
-                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
               ),
               child: pw.Text(
                 'Kelas $className',
                 style: pw.TextStyle(
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.blue800,
                 ),
               ),
             ),
+            pw.SizedBox(height: 8),
+            _buildCompactClassTable(classSections[className]!),
             pw.SizedBox(height: 12),
-            pw.Table(
-              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-              children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColors.grey100),
-                  children: [
-                    _buildPDFTableHeader('Nama Siswa'),
-                    _buildPDFTableHeader('Jenis Kelamin'),
-                    _buildPDFTableHeader('Status'),
-                    _buildPDFTableHeader('No. HP Orang Tua'),
-                  ],
-                ),
-                ...classSections[className]!.map((student) => pw.TableRow(
-                  children: [
-                    _buildPDFTableCell(student['Nama Siswa'] ?? ''),
-                    _buildPDFTableCell(student['Jenis Kelamin'] ?? ''),
-                    _buildPDFTableCell(student['Status'] ?? ''),
-                    _buildPDFTableCell(student['No. HP Orang Tua'] ?? ''),
-                  ],
-                )),
-              ],
-            ),
-            pw.SizedBox(height: 16),
           ],
         ],
       ),
@@ -655,6 +804,135 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
         ),
       );
     }
+  }
+  
+  pw.Widget _buildCompactClassTable(List<Map<String, dynamic>> students) {
+    if (students.isEmpty) {
+      return pw.Container(
+        padding: const pw.EdgeInsets.all(16),
+        child: pw.Text(
+          'Tidak ada siswa terdaftar',
+          style: pw.TextStyle(
+            fontSize: 10,
+            fontStyle: pw.FontStyle.italic,
+            color: PdfColors.grey600,
+          ),
+        ),
+      );
+    }
+    
+    // Check if we can fit 2 columns side by side (if we have enough students and they fit)
+    const bool use2ColumnLayout = true; // We'll always try 2-column for better space usage
+    
+    if (use2ColumnLayout && students.length > 3) {
+      return _build2ColumnLayout(students);
+    } else {
+      return _buildSingleColumnLayout(students);
+    }
+  }
+  
+  pw.Widget _build2ColumnLayout(List<Map<String, dynamic>> students) {
+    // Split students into two columns
+    final int halfLength = (students.length / 2).ceil();
+    final leftColumn = students.take(halfLength).toList();
+    final rightColumn = students.skip(halfLength).toList();
+    
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        // Left Column
+        pw.Expanded(
+          child: _buildCompactTable(leftColumn, startIndex: 0),
+        ),
+        pw.SizedBox(width: 16),
+        // Right Column
+        pw.Expanded(
+          child: _buildCompactTable(rightColumn, startIndex: halfLength),
+        ),
+      ],
+    );
+  }
+  
+  pw.Widget _buildSingleColumnLayout(List<Map<String, dynamic>> students) {
+    return _buildCompactTable(students, startIndex: 0);
+  }
+  
+  pw.Widget _buildCompactTable(List<Map<String, dynamic>> students, {required int startIndex}) {
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.3),
+      columnWidths: {
+        0: const pw.FixedColumnWidth(25), // No
+        1: const pw.FlexColumnWidth(3),   // Nama (larger)
+        2: const pw.FixedColumnWidth(20), // Gender (compact)
+        // Removed phone column
+      },
+      children: [
+        // Header row
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey100),
+          children: [
+            _buildCompactPDFTableHeader('No'),
+            _buildCompactPDFTableHeader('Nama Siswa'),
+            _buildCompactPDFTableHeader('JK'), // Shortened "Jenis Kelamin" to "JK"
+            // Phone header removed
+          ],
+        ),
+        // Data rows
+        ...students.asMap().entries.map((entry) {
+          final index = entry.key;
+          final student = entry.value;
+          return pw.TableRow(
+            children: [
+              _buildCompactPDFTableCell((startIndex + index + 1).toString()),
+              _buildCompactPDFTableCell(student['Nama Siswa'] ?? '', isName: true),
+              _buildCompactPDFTableCell(_shortenGender(student['Jenis Kelamin'] ?? '')),
+              // Phone cell removed
+            ],
+          );
+        }),
+      ],
+    );
+  }
+  
+  String _shortenGender(String gender) {
+    switch (gender.toLowerCase()) {
+      case 'laki-laki':
+      case 'l':
+        return 'L';
+      case 'perempuan':
+      case 'p':
+        return 'P';
+      default:
+        return gender.isNotEmpty ? gender[0].toUpperCase() : '-';
+    }
+  }
+
+  pw.Widget _buildCompactPDFTableHeader(String text) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(4),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontWeight: pw.FontWeight.bold,
+          fontSize: 8,
+          color: PdfColors.blue800,
+        ),
+        textAlign: pw.TextAlign.center,
+      ),
+    );
+  }
+
+  pw.Widget _buildCompactPDFTableCell(String text, {bool isName = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(4),
+      child: pw.Text(
+        text,
+        style: const pw.TextStyle(fontSize: 7),
+        textAlign: isName ? pw.TextAlign.left : pw.TextAlign.center,
+        maxLines: isName ? 2 : 1,
+        overflow: pw.TextOverflow.clip,
+      ),
+    );
   }
 
   pw.Widget _buildPDFTableHeader(String text) {

@@ -19,7 +19,6 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
   late TextEditingController _classController;
   String? _selectedYearId;
   String? _selectedGender;
-  late TextEditingController _parentPhoneController;
   bool _isSaving = false;
   String? _message;
   @override
@@ -52,16 +51,12 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
         ? (widget.student!['enrollments'] as List).first['year_id']
         : null;
     _selectedGender = widget.student?['gender'];
-    _parentPhoneController =
-        TextEditingController(text: widget.student?['parent_phone'] ?? '');
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _classController.dispose();
-    // _yearController.dispose();
-    _parentPhoneController.dispose();
     super.dispose();
   }
 
@@ -98,9 +93,6 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
     final studentData = {
       'name': _nameController.text.trim(),
       'gender': _selectedGender,
-      'parent_phone': _parentPhoneController.text.trim().isEmpty
-          ? ' '
-          : _parentPhoneController.text.trim(),
       'status': 'active',
       'school_id': widget.userInfo?['school_id'] ??
           'school_1', // Default to school_1 if not provided
@@ -113,31 +105,6 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       ],
     };
     try {
-      // Duplicate check: name + phone (only if phone is provided)
-      final phoneNumber = _parentPhoneController.text.trim();
-      if (phoneNumber.isNotEmpty) {
-        final existing = await FirebaseFirestore.instance
-            .collection('students')
-            .where('name', isEqualTo: _nameController.text.trim())
-            .where('parent_phone', isEqualTo: phoneNumber)
-            .get();
-        if (existing.docs.isNotEmpty &&
-            (widget.student == null ||
-                widget.student!['id'] != existing.docs.first.id)) {
-          setState(() {
-            _isSaving = false;
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text(
-                      'Siswa dengan nama dan nomor HP ini sudah terdaftar!'),
-                  backgroundColor: Colors.red),
-            );
-          }
-          return;
-        }
-      }
       String studentId;
       if (widget.student != null && widget.student!['id'] != null) {
         // Update existing student
@@ -425,18 +392,8 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _parentPhoneController,
-                    decoration: InputDecoration(
-                      labelText: 'No. HP Orang Tua',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      prefixIcon: const Icon(Icons.phone_outlined),
-                    ),
-                    keyboardType: TextInputType.phone,
-                  ),
-                  const SizedBox(height: 24),
                   if (!isEdit) ...[
+                    const SizedBox(height: 8),
                     ElevatedButton.icon(
                       onPressed: _showBulkCreationDialog,
                       icon: const Icon(Icons.group_add_outlined),
@@ -448,7 +405,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                         backgroundColor: Colors.orange,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                   ],
                   _isSaving
                       ? const Center(child: CircularProgressIndicator())
@@ -510,7 +467,7 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
   int _numberOfStudents = 1;
   bool _isLoading = false;
   List<TextEditingController> _nameControllers = [];
-  List<TextEditingController> _phoneControllers = [];
+  // Removed phone controllers
 
   @override
   void initState() {
@@ -520,10 +477,8 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
 
   void _updateControllers() {
     _nameControllers.clear();
-    _phoneControllers.clear();
     for (int i = 0; i < _numberOfStudents; i++) {
       _nameControllers.add(TextEditingController());
-      _phoneControllers.add(TextEditingController());
     }
   }
 
@@ -532,9 +487,7 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
     for (var controller in _nameControllers) {
       controller.dispose();
     }
-    for (var controller in _phoneControllers) {
-      controller.dispose();
-    }
+    
     super.dispose();
   }
 
@@ -585,14 +538,12 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
       // Create students
       for (int i = 0; i < _numberOfStudents; i++) {
         final name = _nameControllers[i].text.trim();
-        final phone = _phoneControllers[i].text.trim();
 
         if (name.isEmpty) continue; // Skip empty names
 
         final studentData = {
           'name': name,
           'gender': _selectedGender,
-          'parent_phone': phone.isEmpty ? ' ' : phone,
           'status': 'active',
           'school_id': widget.userInfo?['school_id'] ?? 'school_1',
           'enrollments': [
@@ -885,17 +836,7 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
                                       value!.isEmpty ? 'Masukkan nama' : null,
                                 ),
                                 const SizedBox(height: 8),
-                                TextFormField(
-                                  controller: _phoneControllers[index],
-                                  decoration: InputDecoration(
-                                    labelText: 'No. HP Orang Tua (opsional)',
-                                    border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8)),
-                                    prefixIcon:
-                                        const Icon(Icons.phone_outlined),
-                                  ),
-                                  keyboardType: TextInputType.phone,
-                                ),
+                                // Parent phone removed
                               ],
                             ),
                           );

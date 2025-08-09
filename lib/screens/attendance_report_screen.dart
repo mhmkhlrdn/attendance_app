@@ -27,11 +27,28 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   String _reportType = 'daily'; // 'daily', 'monthly', 'yearly'
   List<QueryDocumentSnapshot>? _classes;
   bool _isExporting = false;
+  String? _schoolName;
 
   @override
   void initState() {
     super.initState();
     _fetchClasses();
+    _loadSchoolName();
+  }
+
+  Future<void> _loadSchoolName() async {
+    if (widget.userInfo['school_id'] != null) {
+      final schoolDoc = await FirebaseFirestore.instance
+          .collection('schools')
+          .doc(widget.userInfo['school_id'])
+          .get();
+      
+      if (schoolDoc.exists) {
+        setState(() {
+          _schoolName = schoolDoc.data()?['name'] ?? 'Sekolah';
+        });
+      }
+    }
   }
 
   Future<void> _fetchClasses() async {
@@ -199,9 +216,18 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
+                      _schoolName ?? 'SEKOLAH',
+                      style: pw.TextStyle(
+                        fontSize: 18,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blue800,
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
                       'LAPORAN PRESENSI SISWA',
                       style: pw.TextStyle(
-                        fontSize: 20,
+                        fontSize: 16,
                         fontWeight: pw.FontWeight.bold,
                         color: PdfColors.blue800,
                       ),

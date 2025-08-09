@@ -31,6 +31,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool attendanceExistsToday = false;
   String? attendanceDocId;
   String? currentYearId;
+  bool canEdit = false;
+  DateTime? _scheduleEndTime;
 
   @override
   void initState() {
@@ -130,6 +132,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           if (currentTime >= morningTime && currentTime <= morningEndTime) {
             foundSchedule = data;
             foundScheduleId = doc.id;
+            _scheduleEndTime = DateTime(now.year, now.month, now.day, 8, 30);
             print('  ✓ FOUND DAILY MORNING SCHEDULE!');
             break;
           }
@@ -168,6 +171,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 if (nowMinutes >= startMinutes && nowMinutes <= endMinutes) {
                   foundSchedule = data;
                   foundScheduleId = doc.id;
+                  _scheduleEndTime = DateTime(now.year, now.month, now.day, endHour, endMinute);
                   print('    ✓ FOUND SUBJECT-SPECIFIC SCHEDULE!');
                   break;
                 } else if (startMinutes > nowMinutes) {
@@ -238,6 +242,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       scheduleType = foundSchedule['schedule_type'];
       scheduleSubject = foundSchedule['subject'];
       scheduleTime = foundSchedule['time'];
+      // Determine editability
+      if (_scheduleEndTime != null) {
+        canEdit = DateTime.now().isBefore(_scheduleEndTime!) || DateTime.now().isAtSameMomentAs(_scheduleEndTime!);
+      } else {
+        canEdit = false;
+      }
 
       // Check if attendance already exists for today
       final today = DateTime(now.year, now.month, now.day);
@@ -456,7 +466,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              'Presensi untuk hari ini sudah ada',
+                              canEdit ? 'Presensi hari ini dapat diedit hingga ${_formattedEndTime()}' : 'Presensi untuk hari ini sudah ada',
                               style: TextStyle(
                                 color: Colors.orange[800],
                                 fontWeight: FontWeight.w500,
@@ -470,7 +480,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
                 
                 // Quick Actions
-                if (!attendanceExistsToday) ...[
+                if (canEdit) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(
@@ -521,15 +531,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                         child: ListTile(
                           title: Text(s['name'] ?? 'Nama tidak tersedia'),
-                          trailing: attendanceExistsToday 
-                            ? Text(
-                                attendance[s['id']] ?? 'Tidak ada data',
-                                style: TextStyle(
-                                  color: _getAttendanceColor(attendance[s['id']]),
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              )
-                            : DropdownButton<String>(
+                          trailing: canEdit 
+                            ? DropdownButton<String>(
                                 value: attendance[s['id']],
                                 items: const [
                                   DropdownMenuItem(value: 'hadir', child: Text('Hadir')),
@@ -542,7 +545,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                     attendance[s['id']] = value!;
                                   });
                                 },
-                              ),
+                              )
+                            : Text(
+                                attendance[s['id']] ?? 'Tidak ada data',
+                                style: TextStyle(
+                                  color: _getAttendanceColor(attendance[s['id']]),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              )
                         ),
                       );
                     },
@@ -550,12 +560,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
               ],
             ),
-      floatingActionButton: isLoading || errorMsg != null || attendanceExistsToday
+      floatingActionButton: isLoading || errorMsg != null || !canEdit
         ? null
         : FloatingActionButton.extended(
-            onPressed: _saveAttendance,
+            onPressed: _saveOrUpdateAttendance,
             icon: const Icon(Icons.save),
-            label: const Text('Simpan Presensi'),
+            label: Text(attendanceExistsToday ? 'Perbarui Presensi' : 'Simpan Presensi'),
             backgroundColor: Colors.teal,
           ),
     );
@@ -597,7 +607,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  Future<void> _saveAttendance() async {
+  String _formattedEndTime() {
+    if (_scheduleEndTime == null) return '';
+    final h = _scheduleEndTime!.hour.toString().padLeft(2, '0');
+    final m = _scheduleEndTime!.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  Future<void> _saveOrUpdateAttendance() async {
     if (classId == null || scheduleId == null) return;
     
     // Check if all students have attendance status
@@ -642,30 +659,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     try {
       if (connectivityService.isConnected) {
         // Online: Check if attendance already exists before saving
-        final today = DateTime(now.year, now.month, now.day);
-        final attendanceExists = await OfflineSyncService.checkAttendanceExists(
-          scheduleId!,
-          userInfo['nuptk'] ?? '',
-          today,
-        );
-
-        if (attendanceExists) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Presensi untuk hari ini sudah ada!'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-          return;
+        if (attendanceExistsToday && attendanceDocId != null) {
+          // Update existing attendance
+          await FirebaseFirestore.instance.collection('attendances').doc(attendanceDocId).update({
+            'attendance': attendance,
+            'student_ids': attendance.keys.toList(),
+            'updated_at': FieldValue.serverTimestamp(),
+          });
+        } else {
+          // Save new attendance
+          await FirebaseFirestore.instance.collection('attendances').add({
+            ...attendanceData,
+            'created_at': FieldValue.serverTimestamp(),
+          });
         }
-
-        // Save directly to Firestore
-        await FirebaseFirestore.instance.collection('attendances').add({
-          ...attendanceData,
-          'created_at': FieldValue.serverTimestamp(),
-        });
         
         // Set attendance as taken for today
         setState(() {
@@ -674,8 +681,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Presensi berhasil disimpan!'),
+            SnackBar(
+              content: Text(attendanceDocId != null ? 'Presensi berhasil diperbarui!' : 'Presensi berhasil disimpan!'),
               backgroundColor: Colors.green,
             ),
           );
@@ -730,7 +737,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                  pendingDateTime.day == today.day;
         });
 
-        if (hasPendingToday) {
+        if (hasPendingToday && !attendanceExistsToday) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(

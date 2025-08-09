@@ -178,33 +178,53 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('classes').where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1').snapshots(),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
+                      FutureBuilder<QuerySnapshot>(
+                        future: FirebaseFirestore.instance
+                            .collection('school_years')
+                            .orderBy('start_date', descending: true)
+                            .limit(1)
+                            .get(),
+                        builder: (context, yearSnapshot) {
+                          if (yearSnapshot.connectionState == ConnectionState.waiting) {
                             return const Center(child: CircularProgressIndicator());
                           }
-                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                            return const Text('Tidak ada kelas tersedia.');
+                          if (!yearSnapshot.hasData || yearSnapshot.data!.docs.isEmpty) {
+                            return const Text('Tidak ada tahun ajaran tersedia.');
                           }
-                          final classes = snapshot.data!.docs;
-                          final classOptions = classes.map((doc) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            return DropdownMenuItem(
-                              value: doc.id,
-                              child: Text('${data['grade']} ${data['class_name']}'),
-                            );
-                          }).toList()
-                            ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
-                          return DropdownButtonFormField<String>(
-                            value: _selectedClassId,
-                            decoration: const InputDecoration(
-                              labelText: 'Kelas',
-                              border: OutlineInputBorder(),
-                            ),
-                            items: classOptions,
-                            onChanged: (value) => setState(() => _selectedClassId = value),
-                            validator: (value) => value == null ? 'Pilih kelas' : null,
+                          final latestYearId = yearSnapshot.data!.docs.first.id;
+                          return StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('classes')
+                                .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
+                                .where('year_id', isEqualTo: latestYearId)
+                                .snapshots(),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState == ConnectionState.waiting) {
+                                return const Center(child: CircularProgressIndicator());
+                              }
+                              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                                return const Text('Tidak ada kelas tersedia.');
+                              }
+                              final classes = snapshot.data!.docs;
+                              final classOptions = classes.map((doc) {
+                                final data = doc.data() as Map<String, dynamic>;
+                                return DropdownMenuItem(
+                                  value: doc.id,
+                                  child: Text('${data['grade']} ${data['class_name']}'),
+                                );
+                              }).toList()
+                                ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
+                              return DropdownButtonFormField<String>(
+                                value: _selectedClassId,
+                                decoration: const InputDecoration(
+                                  labelText: 'Kelas',
+                                  border: OutlineInputBorder(),
+                                ),
+                                items: classOptions,
+                                onChanged: (value) => setState(() => _selectedClassId = value),
+                                validator: (value) => value == null ? 'Pilih kelas' : null,
+                              );
+                            },
                           );
                         },
                       ),

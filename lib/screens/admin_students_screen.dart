@@ -13,14 +13,14 @@ import 'attendance_history_screen.dart';
 import 'attendance_report_screen.dart';
 import 'promotion_screen.dart';
 import 'data_migration_screen.dart';
-import 'version_management_screen.dart';
+// import 'version_management_screen.dart';
 import 'change_password_screen.dart';
 import '../services/local_storage_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/offline_sync_service.dart';
-import '../services/version_update_service.dart';
+// import '../services/version_update_service.dart';
+// import 'version_update_screen.dart';
 import 'sync_status_screen.dart';
-import 'version_update_screen.dart';
 import 'archived_data_screen.dart';
 
 class AdminStudentsScreen extends StatefulWidget {
@@ -61,46 +61,18 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
     );
   }
 
-  void _checkForUpdates() async {
-    try {
-      final updateInfo = await VersionUpdateService().forceCheckForUpdate();
-      if (updateInfo != null && mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => VersionUpdateScreen(
-              updateInfo: updateInfo,
-              onSkip: () => Navigator.pop(context),
-              onContinue: () => Navigator.pop(context),
-            ),
-          ),
-        );
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Tidak ada pembaruan tersedia'),
-            backgroundColor: Colors.green.shade600,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red.shade600,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    }
+  void _checkForUpdates() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Pemeriksaan pembaruan dinonaktifkan'),
+        backgroundColor: Colors.blueGrey.shade600,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
   }
 
   // void _debugVersionCheck() async {
@@ -358,30 +330,6 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                         builder: (context) => const SyncStatusScreen(),
                       ),
                     );
-                  },
-                ),
-                if (widget.role == 'admin')
-                  ListTile(
-                    leading: const Icon(Icons.system_update_alt, color: Colors.indigo),
-                    title: const Text('Manajemen Versi'),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => VersionManagementScreen(
-                            userInfo: widget.userInfo,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ListTile(
-                  leading: const Icon(Icons.update, color: Colors.orange),
-                  title: const Text('Cek Pembaruan'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _checkForUpdates();
                   },
                 ),
                 ListTile(

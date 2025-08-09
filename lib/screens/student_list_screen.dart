@@ -2,7 +2,7 @@ import 'package:attendance_app/screens/student_form_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'student_detail_screen.dart';
+import 'student_details_screen.dart';
 import '../services/student_helper_service.dart';
 
 class StudentListScreen extends StatefulWidget {
@@ -67,6 +67,25 @@ class _StudentListScreenState extends State<StudentListScreen> {
 
   String _getClassDisplay(Map<String, dynamic> studentData) {
     return StudentHelperService.getCurrentClassDisplay(studentData);
+  }
+
+  Future<String> _getCurrentYear() async {
+    try {
+      final years = await FirebaseFirestore.instance
+          .collection('school_years')
+          .orderBy('start_date', descending: true)
+          .limit(1)
+          .get();
+      
+      if (years.docs.isNotEmpty) {
+        final doc = years.docs.first;
+        final data = doc.data();
+        return (data['name'] ?? doc.id).toString();
+      }
+    } catch (e) {
+      print('Error loading current year: $e');
+    }
+    return 'Tahun Ajaran Aktif';
   }
 
   IconData _getGenderIcon(String? gender) {
@@ -256,13 +275,20 @@ class _StudentListScreenState extends State<StudentListScreen> {
                               ),
                               title: Text(data['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
                               subtitle: Text(_getClassDisplay(data)),
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => StudentDetailScreen(studentId: student.id),
-                                  ),
-                                );
+                              onTap: () async {
+                                final currentYear = await _getCurrentYear();
+                                if (mounted) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => StudentDetailsScreen(
+                                        studentId: student.id,
+                                        userInfo: widget.userInfo ?? {},
+                                        selectedYear: currentYear,
+                                      ),
+                                    ),
+                                  );
+                                }
                               },
                               trailing: widget.role == 'admin'
                                   ? Row(
@@ -285,7 +311,31 @@ class _StudentListScreenState extends State<StudentListScreen> {
                                   IconButton(
                                     icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                                     onPressed: () async {
-                                      await _deleteStudentAndRemoveFromClasses(student.id);
+                                      final confirm = await showDialog<bool>(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: const Text('Konfirmasi Hapus'),
+                                          content: Text('Yakin ingin menghapus siswa "${data['name'] ?? ''}"? Tindakan ini tidak dapat dibatalkan.'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(context, false),
+                                              child: const Text('Batal'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(context, true),
+                                              child: const Text('Hapus', style: TextStyle(color: Colors.red)),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (confirm == true) {
+                                        await _deleteStudentAndRemoveFromClasses(student.id);
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('Siswa berhasil dihapus')),
+                                          );
+                                        }
+                                      }
                                     },
                                   ),
                                 ],

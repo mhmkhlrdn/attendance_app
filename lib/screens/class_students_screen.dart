@@ -92,7 +92,7 @@ class ClassStudentsScreen extends StatelessWidget {
               final data = currentStudents[index].data() as Map<String, dynamic>;
               return ListTile(
                 title: Text(data['name'] ?? ''),
-                subtitle: Text('Jenis Kelamin: ${data['gender'] ?? '-'} | No. Hp Orang Tua: ${data['parent_phone'] ?? '-'}'),
+                subtitle: Text('Jenis Kelamin: ${data['gender'] ?? '-'}'),
               );
             },
           );

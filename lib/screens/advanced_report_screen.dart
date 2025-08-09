@@ -389,7 +389,6 @@ class _AdvancedReportScreenState extends State<AdvancedReportScreen>
                   ),
                   const SizedBox(height: 8),
                   Text('Gender: ${student['gender'] ?? '-'}'),
-                  Text('Phone: ${student['parent_phone'] ?? '-'}'),
                 ],
               ),
             ),

@@ -3,10 +3,10 @@ import 'dart:async';
 import '../services/local_storage_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/offline_sync_service.dart';
-import '../services/version_update_service.dart';
+// Version update screens/services removed
 import 'admin_students_screen.dart';
 import 'login_screen.dart';
-import 'version_update_screen.dart';
+// Version update screens/services removed
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -27,7 +27,7 @@ class _SplashScreenState extends State<SplashScreen>
   Map<String, String>? _userInfo;
   String _loadingText = 'Memulai aplikasi...';
   int _loadingStep = 0;
-  VersionUpdateInfo? _updateInfo;
+  // Version update removed
 
   @override
   void initState() {
@@ -78,8 +78,7 @@ class _SplashScreenState extends State<SplashScreen>
     // Simulate loading steps
     await _simulateLoadingSteps();
     
-    // Check for updates
-    await _checkForUpdates();
+    // Skipping update checks (feature removed)
     
     // Check login status
     await _checkLoginStatus();
@@ -110,18 +109,7 @@ class _SplashScreenState extends State<SplashScreen>
     }
   }
 
-  Future<void> _checkForUpdates() async {
-    try {
-      final updateInfo = await VersionUpdateService().checkForUpdate();
-      if (updateInfo != null) {
-        setState(() {
-          _updateInfo = updateInfo;
-        });
-      }
-    } catch (e) {
-      print('Error checking for updates: $e');
-    }
-  }
+  // Update checks removed
 
   Future<void> _checkLoginStatus() async {
     try {
@@ -150,29 +138,7 @@ class _SplashScreenState extends State<SplashScreen>
   void _navigateToNextScreen() {
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
-        // If there's an update available, show update screen first
-        if (_updateInfo != null) {
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) {
-                return VersionUpdateScreen(
-                  updateInfo: _updateInfo!,
-                  onSkip: () => _navigateToMainScreen(),
-                  onContinue: () => _navigateToMainScreen(),
-                );
-              },
-              transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: child,
-                );
-              },
-              transitionDuration: const Duration(milliseconds: 500),
-            ),
-          );
-        } else {
-          _navigateToMainScreen();
-        }
+        _navigateToMainScreen();
       }
     });
   }
@@ -339,7 +305,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(
-                                  'Versi 1.1.0',
+                                  'Versi 1.2.0',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.teal.shade700,
