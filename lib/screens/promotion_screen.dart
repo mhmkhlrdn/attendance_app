@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import '../services/promotion_service.dart';
 
 class PromotionScreen extends StatefulWidget {
-  const PromotionScreen({Key? key}) : super(key: key);
+  final Map<String, String> userInfo;
+  final String role;
+
+  const PromotionScreen({Key? key, required this.userInfo, this.role = 'admin'}) : super(key: key);
 
   @override
   State<PromotionScreen> createState() => _PromotionScreenState();
@@ -36,7 +39,10 @@ class _PromotionScreenState extends State<PromotionScreen> {
   Future<void> _fetchPreview() async {
     if (_selectedYearId == null) return;
     setState(() => _loading = true);
-    final preview = await PromotionService.getPromotionPreview(_selectedYearId!);
+    final preview = await PromotionService.getPromotionPreview(
+      _selectedYearId!,
+      schoolId: widget.userInfo['school_id'] ?? '',
+    );
     setState(() {
       _toPromote = preview['toPromote'] ?? 0;
       _toGraduate = preview['toGraduate'] ?? 0;
@@ -48,7 +54,10 @@ class _PromotionScreenState extends State<PromotionScreen> {
   Future<void> _promote() async {
     if (_selectedYearId == null) return;
     setState(() => _promoting = true);
-    final result = await PromotionService.promoteStudents(_selectedYearId!);
+    final result = await PromotionService.promoteStudents(
+      _selectedYearId!,
+      schoolId: widget.userInfo['school_id'] ?? '',
+    );
     setState(() => _promoting = false);
     showDialog(
       context: context,
@@ -98,7 +107,8 @@ class _PromotionScreenState extends State<PromotionScreen> {
                               value: y['id']?.toString(),
                               child: Text(y['name']?.toString() ?? ''),
                             ))
-                        .toList(),
+                        .toList()
+                          ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? '')),
                     onChanged: (val) {
                       setState(() {
                         _selectedYearId = val;

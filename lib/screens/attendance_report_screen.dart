@@ -45,7 +45,9 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   }
 
   Future<List<QueryDocumentSnapshot>> _fetchAttendanceRecords() async {
-    Query query = FirebaseFirestore.instance.collection('attendances');
+    Query query = FirebaseFirestore.instance
+        .collection('attendances')
+        .where('school_id', isEqualTo: widget.userInfo['school_id']);
     
     // Filter by class if selected
     if (_selectedClassId != null && _selectedClassId!.isNotEmpty) {
@@ -762,7 +764,12 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                                                   value: doc.id,
                                                   child: Text(label),
                                                 );
-                                              }).toList(),
+                                                                                              }).toList()
+                                                  ..sort((a, b) {
+                                                    if (a.value == '') return -1;
+                                                    if (b.value == '') return 1;
+                                                    return ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? '');
+                                                  }),
                                             ],
                                             onChanged: (v) => setState(() => _selectedClassId = v == '' ? null : v),
                                           ),

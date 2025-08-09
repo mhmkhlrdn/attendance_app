@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+ 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -17,6 +18,34 @@ class ClassListScreen extends StatefulWidget {
 class _ClassListScreenState extends State<ClassListScreen> {
   String _search = '';
   String? _yearFilter;
+  String? _latestYearId;
+  bool _loadingYear = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLatestYear();
+  }
+
+  Future<void> _loadLatestYear() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('school_years')
+          .orderBy('start_date', descending: true)
+          .limit(1)
+          .get();
+      setState(() {
+        _latestYearId = snapshot.docs.isNotEmpty ? snapshot.docs.first.id : null;
+        _loadingYear = false;
+      });
+    } catch (e) {
+      setState(() {
+        _latestYearId = null;
+        _loadingYear = false;
+      });
+    }
+  }
+  
 
   void _showFilterDialog(List<String> yearOptions) async {
     final result = await showDialog<String>(
@@ -29,7 +58,12 @@ class _ClassListScreenState extends State<ClassListScreen> {
             isExpanded: true,
             value: tempFilter ?? '',
             items: [const DropdownMenuItem(value: '', child: Text('Semua Tahun'))] +
-                yearOptions.map((year) => DropdownMenuItem(value: year, child: Text(year))).toList(),
+                yearOptions.map((year) => DropdownMenuItem(value: year, child: Text(year))).toList()
+                  ..sort((a, b) {
+                    if (a.value == '') return -1;
+                    if (b.value == '') return 1;
+                    return ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? '');
+                  }),
             onChanged: (v) => tempFilter = v,
             decoration: const InputDecoration(labelText: 'Tahun'),
           ),
@@ -90,43 +124,58 @@ class _ClassListScreenState extends State<ClassListScreen> {
                 const SizedBox(width: 8),
                 Builder(
                   builder: (context) {
-                    final classes = widget.userInfo != null 
-                      ? FirebaseFirestore.instance
-                          .collection('classes')
-                          .where('school_id', isEqualTo: widget.userInfo!['school_id'])
-                          .snapshots()
-                      : FirebaseFirestore.instance.collection('classes').snapshots();
-                    return StreamBuilder<QuerySnapshot>(
-                      stream: classes,
-                      builder: (context, snapshot) {
-                        final yearSet = <String>{};
-                        if (snapshot.hasData) {
-                          for (var doc in snapshot.data!.docs) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            final year = data['year']?.toString() ?? data['year_id']?.toString() ?? '';
-                            if (year.isNotEmpty) yearSet.add(year);
-                          }
-                        }
-                        return IconButton(
-                          icon: const Icon(Icons.filter_list),
-                          tooltip: 'Filter',
-                          onPressed: () => _showFilterDialog(yearSet.toList()),
-                        );
-                      },
-                    );
+                    if (_loadingYear) {
+                      return const SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                      );
+                    }
+                    Query classesQuery = FirebaseFirestore.instance.collection('classes');
+                    if (widget.userInfo != null) {
+                      classesQuery = classesQuery.where('school_id', isEqualTo: widget.userInfo!['school_id']);
+                    }
+                    if (_latestYearId != null) {
+                      classesQuery = classesQuery.where('year_id', isEqualTo: _latestYearId);
+                    }
+                    final classes = classesQuery.snapshots();
+            return StreamBuilder<QuerySnapshot>(
+              stream: classes,
+              builder: (context, snapshot) {
+                final yearSet = <String>{};
+                if (snapshot.hasData) {
+                  for (var doc in snapshot.data!.docs) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final year = data['year']?.toString() ?? data['year_id']?.toString() ?? '';
+                    if (year.isNotEmpty) yearSet.add(year);
+                  }
+                }
+                return IconButton(
+                  icon: const Icon(Icons.filter_list),
+                  tooltip: 'Filter',
+                  onPressed: () => _showFilterDialog(yearSet.toList()),
+                );
+              },
+            );
                   },
                 ),
               ],
             ),
           ),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: widget.userInfo != null 
-                ? FirebaseFirestore.instance
-                    .collection('classes')
-                    .where('school_id', isEqualTo: widget.userInfo!['school_id'])
-                    .snapshots()
-                : FirebaseFirestore.instance.collection('classes').snapshots(),
+            child: _loadingYear
+                ? const Center(child: CircularProgressIndicator())
+                : StreamBuilder<QuerySnapshot>(
+              stream: (() {
+                Query query = FirebaseFirestore.instance.collection('classes');
+                if (widget.userInfo != null) {
+                  query = query.where('school_id', isEqualTo: widget.userInfo!['school_id']);
+                }
+                if (_latestYearId != null) {
+                  query = query.where('year_id', isEqualTo: _latestYearId);
+                }
+                return query.snapshots();
+              })(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

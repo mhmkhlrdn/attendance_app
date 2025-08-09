@@ -29,7 +29,12 @@ class _StudentListScreenState extends State<StudentListScreen> {
             isExpanded: true,
             value: tempFilter ?? '',
             items: [const DropdownMenuItem(value: '', child: Text('Semua Kelas'))] +
-                classOptions.map((kelas) => DropdownMenuItem(value: kelas, child: Text(kelas))).toList(),
+                classOptions.map((kelas) => DropdownMenuItem(value: kelas, child: Text(kelas))).toList()
+                  ..sort((a, b) {
+                    if (a.value == '') return -1;
+                    if (b.value == '') return 1;
+                    return ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? '');
+                  }),
             onChanged: (v) => tempFilter = v,
             decoration: const InputDecoration(labelText: 'Kelas'),
           ),
@@ -143,7 +148,10 @@ class _StudentListScreenState extends State<StudentListScreen> {
                 const SizedBox(width: 8),
                 Builder(
                   builder: (context) {
-                    final students = FirebaseFirestore.instance.collection('students').snapshots();
+                    final students = FirebaseFirestore.instance
+                        .collection('students')
+                        .where('status', isEqualTo: 'active')
+                        .snapshots();
                     return StreamBuilder<QuerySnapshot>(
                       stream: students,
                       builder: (context, snapshot) {
@@ -174,8 +182,12 @@ class _StudentListScreenState extends State<StudentListScreen> {
                 ? FirebaseFirestore.instance
                     .collection('students')
                     .where('school_id', isEqualTo: widget.userInfo!['school_id'])
+                    .where('status', isEqualTo: 'active')
                     .snapshots()
-                : FirebaseFirestore.instance.collection('students').snapshots(),
+                : FirebaseFirestore.instance
+                    .collection('students')
+                    .where('status', isEqualTo: 'active')
+                    .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

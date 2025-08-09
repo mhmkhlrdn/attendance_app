@@ -21,6 +21,7 @@ import '../services/offline_sync_service.dart';
 import '../services/version_update_service.dart';
 import 'sync_status_screen.dart';
 import 'version_update_screen.dart';
+import 'archived_data_screen.dart';
 
 class AdminStudentsScreen extends StatefulWidget {
   final Map<String, String> userInfo;
@@ -289,7 +290,26 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const PromotionScreen(),
+                          builder: (context) => PromotionScreen(
+                            userInfo: widget.userInfo,
+                            role: widget.role,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                if (widget.role == 'admin')
+                  ListTile(
+                    leading: const Icon(Icons.archive, color: Colors.brown),
+                    title: const Text('Data Arsip'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ArchivedDataScreen(
+                            userInfo: widget.userInfo,
+                          ),
                         ),
                       );
                     },

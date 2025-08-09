@@ -208,7 +208,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 value: school['id'] as String,
                                 child: Text(school['name'] as String),
                               );
-                            }).toList(),
+                            }).toList()
+                              ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? '')),
                             onChanged: (value) {
                               setState(() {
                                 _selectedSchoolId = value;

@@ -32,7 +32,7 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
   Future<void> _createClass() async {
     setState(() => _isLoading = true);
     try {
-      // Duplicate check: grade + class_name + year_id (only if class_name is provided)
+      // Duplicate check: grade + class_name + year_id + school_id (only if class_name is provided)
       final className = _classNameController.text.trim();
       if (className.isNotEmpty) {
         final existing = await FirebaseFirestore.instance
@@ -40,6 +40,7 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
           .where('grade', isEqualTo: _gradeController.text.trim())
           .where('class_name', isEqualTo: className)
           .where('year_id', isEqualTo: _selectedYearId)
+          .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
           .get();
         if (existing.docs.isNotEmpty && (widget.classData == null || widget.classData!['id'] != existing.docs.first.id)) {
           setState(() {
@@ -162,15 +163,17 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
                         return const Center(child: CircularProgressIndicator());
                       }
                       final years = snapshot.data!.docs;
+                      final yearOptions = years.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(
+                          value: doc.id,
+                          child: Text(data['name'] ?? doc.id),
+                        );
+                      }).toList()
+                        ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
                       return DropdownButtonFormField<String>(
                         value: _selectedYearId,
-                        items: years.map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          return DropdownMenuItem<String>(
-                            value: doc.id,
-                            child: Text(data['name'] ?? doc.id),
-                          );
-                        }).toList(),
+                        items: yearOptions,
                         onChanged: (value) {
                           setState(() {
                             _selectedYearId = value;

@@ -188,19 +188,21 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                             return const Text('Tidak ada kelas tersedia.');
                           }
                           final classes = snapshot.data!.docs;
+                          final classOptions = classes.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            return DropdownMenuItem(
+                              value: doc.id,
+                              child: Text('${data['grade']} ${data['class_name']}'),
+                            );
+                          }).toList()
+                            ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
                           return DropdownButtonFormField<String>(
                             value: _selectedClassId,
                             decoration: const InputDecoration(
                               labelText: 'Kelas',
                               border: OutlineInputBorder(),
                             ),
-                            items: classes.map((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-                              return DropdownMenuItem(
-                                value: doc.id,
-                                child: Text('${data['grade']} ${data['class_name']}'),
-                              );
-                            }).toList(),
+                            items: classOptions,
                             onChanged: (value) => setState(() => _selectedClassId = value),
                             validator: (value) => value == null ? 'Pilih kelas' : null,
                           );
@@ -238,19 +240,21 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                             return const Text('Tidak ada guru tersedia.');
                           }
                           final teachers = snapshot.data!.docs;
+                          final teacherOptions = teachers.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            return DropdownMenuItem(
+                              value: doc.id,
+                              child: Text('${data['name']} (${data['nuptk']})'),
+                            );
+                          }).toList()
+                            ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
                           return DropdownButtonFormField<String>(
                             value: _selectedTeacherId,
                             decoration: const InputDecoration(
                               labelText: 'Guru',
                               border: OutlineInputBorder(),
                             ),
-                            items: teachers.map((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-                              return DropdownMenuItem(
-                                value: doc.id,
-                                child: Text('${data['name']} (${data['nuptk']})'),
-                              );
-                            }).toList(),
+                            items: teacherOptions,
                             onChanged: (value) => setState(() => _selectedTeacherId = value),
                             validator: (value) => value == null ? 'Pilih guru' : null,
                           );
@@ -407,7 +411,7 @@ class _CreateScheduleScreenState extends State<CreateScheduleScreen> {
                       if (_scheduleType == 'daily_morning') ...[
                         const SizedBox(height: 8),
                         Text(
-                          'Presensi pagi akan berlangsung selama 30 menit',
+                          'Presensi pagi akan berlangsung selama 120 menit',
                           style: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 12,

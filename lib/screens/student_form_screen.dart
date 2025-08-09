@@ -186,13 +186,15 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                     .collection('classes')
                     .where('grade', isEqualTo: oldGrade)
                     .where('class_name', isEqualTo: oldClass)
-                    .where('year_id', isEqualTo: oldYearId);
+                    .where('year_id', isEqualTo: oldYearId)
+                    .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1');
               } else {
                 oldClassQuery = FirebaseFirestore.instance
                     .collection('classes')
                     .where('grade', isEqualTo: oldGrade)
                     .where('class_name', isEqualTo: ' ')
-                    .where('year_id', isEqualTo: oldYearId);
+                    .where('year_id', isEqualTo: oldYearId)
+                    .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1');
               }
 
               final oldClassSnapshot = await oldClassQuery.limit(1).get();
@@ -215,14 +217,16 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                 .collection('classes')
                 .where('grade', isEqualTo: selectedGrade)
                 .where('class_name', isEqualTo: selectedClass)
-                .where('year_id', isEqualTo: _selectedYearId);
+                .where('year_id', isEqualTo: _selectedYearId)
+                .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1');
           } else {
             // Only grade is provided, class_name is empty or space
             classQuery = FirebaseFirestore.instance
                 .collection('classes')
                 .where('grade', isEqualTo: selectedGrade)
                 .where('class_name', isEqualTo: ' ')
-                .where('year_id', isEqualTo: _selectedYearId);
+                .where('year_id', isEqualTo: _selectedYearId)
+                .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1');
           }
 
           final classSnapshot = await classQuery.limit(1).get();
@@ -318,55 +322,67 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('classes')
-                        .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
+                  FutureBuilder<QuerySnapshot>(
+                    future: FirebaseFirestore.instance
+                        .collection('school_years')
+                        .orderBy('start_date', descending: true)
+                        .limit(1)
+                        .get(),
+                    builder: (context, yearSnap) {
+                      if (!yearSnap.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      final classes = snapshot.data!.docs;
-                      final classOptions = classes.map((doc) {
-                        final data = doc.data() as Map<String, dynamic>;
-                        final grade = data['grade'] ?? '';
-                        final className = data['class_name'] ?? '';
+                      final latestYearId = yearSnap.data!.docs.isNotEmpty ? yearSnap.data!.docs.first.id : null;
+                      if (latestYearId == null) {
+                        return const SizedBox.shrink();
+                      }
+                      Query classesQuery = FirebaseFirestore.instance
+                          .collection('classes')
+                          .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1')
+                          .where('year_id', isEqualTo: latestYearId);
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: classesQuery.snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          final classes = snapshot.data!.docs;
+                          final classOptions = classes.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            final grade = data['grade'] ?? '';
+                            final className = data['class_name'] ?? '';
 
-                        // Handle empty class name (stored as space)
-                        String label;
-                        if (className.trim() == '' || className == ' ') {
-                          label = grade; // Just show the grade
-                        } else {
-                          label = '$grade$className';
-                        }
+                            String label;
+                            if (className.trim() == '' || className == ' ') {
+                              label = grade;
+                            } else {
+                              label = '$grade$className';
+                            }
 
-                        return DropdownMenuItem<String>(
-                          value: label,
-                          child: Text(label),
-                        );
-                      }).toList();
+                            return DropdownMenuItem<String>(
+                              value: label,
+                              child: Text(label),
+                            );
+                          }).toList()
+                            ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
 
-                      return DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        value: _classController.text.isNotEmpty
-                            ? _classController.text
-                            : null,
-                        items: classOptions,
-                        onChanged: (value) {
-                          setState(() {
-                            _classController.text = value ?? '';
-                          });
+                          return DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            value: _classController.text.isNotEmpty ? _classController.text : null,
+                            items: classOptions,
+                            onChanged: (value) {
+                              setState(() {
+                                _classController.text = value ?? '';
+                              });
+                            },
+                            decoration: InputDecoration(
+                              labelText: 'Kelas *',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              prefixIcon: const Icon(Icons.class_outlined),
+                            ),
+                            validator: (value) => value == null || value.isEmpty ? 'Pilih kelas' : null,
+                          );
                         },
-                        decoration: InputDecoration(
-                          labelText: 'Kelas *',
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                          prefixIcon: const Icon(Icons.class_outlined),
-                        ),
-                        validator: (value) => value == null || value.isEmpty
-                            ? 'Pilih kelas'
-                            : null,
                       );
                     },
                   ),
@@ -380,16 +396,18 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
                         return const Center(child: CircularProgressIndicator());
                       }
                       final years = snapshot.data!.docs;
+                      final yearOptions = years.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(
+                          value: doc.id,
+                          child: Text(data['name'] ?? doc.id),
+                        );
+                      }).toList()
+                        ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
                       return DropdownButtonFormField<String>(
                         isExpanded: true,
                         value: _selectedYearId,
-                        items: years.map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          return DropdownMenuItem<String>(
-                            value: doc.id,
-                            child: Text(data['name'] ?? doc.id),
-                          );
-                        }).toList(),
+                        items: yearOptions,
                         onChanged: (value) {
                           setState(() {
                             _selectedYearId = value;
@@ -604,14 +622,16 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
                 .collection('classes')
                 .where('grade', isEqualTo: selectedGrade)
                 .where('class_name', isEqualTo: selectedClass)
-                .where('year_id', isEqualTo: _selectedYearId);
+                .where('year_id', isEqualTo: _selectedYearId)
+                .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1');
           } else {
             // Only grade is provided, class_name is empty or space
             classQuery = firestore
                 .collection('classes')
                 .where('grade', isEqualTo: selectedGrade)
                 .where('class_name', isEqualTo: ' ')
-                .where('year_id', isEqualTo: _selectedYearId);
+                .where('year_id', isEqualTo: _selectedYearId)
+                .where('school_id', isEqualTo: widget.userInfo?['school_id'] ?? 'school_1');
           }
         } else {
           // No grade provided, skip class enrollment
@@ -728,7 +748,8 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
                               value: label,
                               child: Text(label),
                             );
-                          }).toList();
+                          }).toList()
+                            ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
                           return DropdownButtonFormField<String>(
                             isExpanded: true,
                             value: _selectedClass,
@@ -761,16 +782,18 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
                                 child: CircularProgressIndicator());
                           }
                           final years = snapshot.data!.docs;
+                          final yearOptions = years.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            return DropdownMenuItem<String>(
+                              value: doc.id,
+                              child: Text(data['name'] ?? doc.id),
+                            );
+                          }).toList()
+                            ..sort((a, b) => ((a.child as Text).data ?? '').compareTo((b.child as Text).data ?? ''));
                           return DropdownButtonFormField<String>(
                             isExpanded: true,
                             value: _selectedYearId,
-                            items: years.map((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-                              return DropdownMenuItem<String>(
-                                value: doc.id,
-                                child: Text(data['name'] ?? doc.id),
-                              );
-                            }).toList(),
+                            items: yearOptions,
                             onChanged: (value) {
                               setState(() {
                                 _selectedYearId = value;
