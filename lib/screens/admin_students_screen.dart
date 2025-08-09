@@ -233,9 +233,13 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
             ],
           ),
           drawer: Drawer(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
+            child: SafeArea(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ListView(
+                      padding: EdgeInsets.zero,
+                      children: [
                 UserAccountsDrawerHeader(
                   accountName: Text(
                     widget.userInfo['name'] ?? '-',
@@ -352,7 +356,18 @@ class _AdminStudentsScreenState extends State<AdminStudentsScreen> {
                   title: const Text('Keluar'),
                   onTap: _logout,
                 ),
-              ],
+                      ],
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      'KKNTM LP3I TASIK 2025',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           body: _getScreens()[_selectedIndex],

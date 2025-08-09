@@ -139,24 +139,24 @@ class _ClassListScreenState extends State<ClassListScreen> {
                       classesQuery = classesQuery.where('year_id', isEqualTo: _latestYearId);
                     }
                     final classes = classesQuery.snapshots();
-            return StreamBuilder<QuerySnapshot>(
-              stream: classes,
-              builder: (context, snapshot) {
-                final yearSet = <String>{};
-                if (snapshot.hasData) {
-                  for (var doc in snapshot.data!.docs) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final year = data['year']?.toString() ?? data['year_id']?.toString() ?? '';
-                    if (year.isNotEmpty) yearSet.add(year);
-                  }
-                }
-                return IconButton(
-                  icon: const Icon(Icons.filter_list),
-                  tooltip: 'Filter',
-                  onPressed: () => _showFilterDialog(yearSet.toList()),
-                );
-              },
-            );
+                    return StreamBuilder<QuerySnapshot>(
+                      stream: classes,
+                      builder: (context, snapshot) {
+                        final yearSet = <String>{};
+                        if (snapshot.hasData) {
+                          for (var doc in snapshot.data!.docs) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            final year = data['year']?.toString() ?? data['year_id']?.toString() ?? '';
+                            if (year.isNotEmpty) yearSet.add(year);
+                          }
+                        }
+                        return IconButton(
+                          icon: const Icon(Icons.filter_list),
+                          tooltip: 'Filter',
+                          onPressed: () => _showFilterDialog(yearSet.toList()),
+                        );
+                      },
+                    );
                   },
                 ),
               ],

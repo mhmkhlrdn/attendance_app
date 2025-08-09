@@ -387,7 +387,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           .where('school_id', isEqualTo: widget.userInfo['school_id'])
           .where('year_id', isEqualTo: latestYearId)
           .get();
-       
+      
       final classes = classesQuery.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return {
@@ -396,15 +396,15 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           'data': data,
         };
       }).toList();
-       
+      
       // Sort classes by name
       classes.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-       
+      
       setState(() {
         _availableClasses = classes;
         _isLoadingClasses = false;
       });
-       
+      
       print('Loaded ${classes.length} classes for school: ${widget.userInfo['school_id']}');
     } catch (e) {
       print('Error loading classes: $e');

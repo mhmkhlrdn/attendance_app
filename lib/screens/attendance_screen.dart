@@ -668,10 +668,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           });
         } else {
           // Save new attendance
-          await FirebaseFirestore.instance.collection('attendances').add({
-            ...attendanceData,
-            'created_at': FieldValue.serverTimestamp(),
-          });
+        await FirebaseFirestore.instance.collection('attendances').add({
+          ...attendanceData,
+          'created_at': FieldValue.serverTimestamp(),
+        });
         }
         
         // Set attendance as taken for today

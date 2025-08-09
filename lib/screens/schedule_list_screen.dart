@@ -18,6 +18,21 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
   String? _dayFilter;
   String? _typeFilter;
 
+  Future<String> _resolveClassName(String? classId) async {
+    if (classId == null || classId.isEmpty) return '-';
+    try {
+      final doc = await FirebaseFirestore.instance.collection('classes').doc(classId).get();
+      if (!doc.exists) return classId;
+      final data = doc.data() as Map<String, dynamic>;
+      final grade = (data['grade'] ?? '').toString();
+      final className = (data['class_name'] ?? '').toString();
+      if (grade.isEmpty && className.isEmpty) return classId;
+      return [grade, className].where((p) => p.isNotEmpty).join(' ');
+    } catch (_) {
+      return classId;
+    }
+  }
+
   void _showFilterDialog() async {
     final result = await showDialog<Map<String, String?>>(
       context: context,
@@ -92,65 +107,6 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Gagal menghapus jadwal: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _migrateExistingSchedules() async {
-    try {
-      final schedulesQuery = await FirebaseFirestore.instance.collection('schedules').get();
-      int migratedCount = 0;
-      
-      for (var doc in schedulesQuery.docs) {
-        final data = doc.data();
-        
-        // Check if schedule already has the new format
-        if (data['schedule_type'] == null) {
-          // Migrate old format to new format
-          final timeString = data['time'] as String? ?? '';
-          String scheduleType = 'subject_specific';
-          String? dayOfWeek;
-          
-          // Check if it's a daily morning schedule (6:30 AM)
-          if (timeString.contains('06:30') || timeString.contains('6:30')) {
-            scheduleType = 'daily_morning';
-          } else {
-            // Extract day from time string for subject-specific schedules
-            final parts = timeString.split(' ');
-            if (parts.isNotEmpty) {
-              dayOfWeek = parts[0];
-            }
-          }
-          
-          // Update the document with new fields
-          await FirebaseFirestore.instance
-              .collection('schedules')
-              .doc(doc.id)
-              .update({
-                'schedule_type': scheduleType,
-                'day_of_week': dayOfWeek,
-              });
-          
-          migratedCount++;
-        }
-      }
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Berhasil memigrasi $migratedCount jadwal ke format baru'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gagal memigrasi jadwal: $e'),
-            backgroundColor: Colors.red,
-          ),
         );
       }
     }
@@ -289,7 +245,15 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Kelas: ${data['class_id'] ?? ''}'),
+                            FutureBuilder<String>(
+                              future: _resolveClassName(data['class_id'] as String?),
+                              builder: (context, snapshot) {
+                                final display = snapshot.connectionState == ConnectionState.done
+                                    ? (snapshot.data ?? '-')
+                                    : 'Memuat...';
+                                return Text('Kelas: $display');
+                              },
+                            ),
                             Text('Jadwal: ${data['time'] ?? ''}'),
                             if (scheduleType == 'subject_specific' && data['day_of_week'] != null)
                               Text('Hari: ${data['day_of_week']}'),
@@ -368,12 +332,6 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
                   tooltip: 'Tambah Jadwal',
                 ),
                 const SizedBox(height: 8),
-                FloatingActionButton(
-                  onPressed: _migrateExistingSchedules,
-                  child: const Icon(Icons.upgrade),
-                  tooltip: 'Migrasi Jadwal',
-                  backgroundColor: Colors.orange,
-                ),
               ],
             )
           : null,
