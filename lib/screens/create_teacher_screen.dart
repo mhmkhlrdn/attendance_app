@@ -123,7 +123,7 @@ class _CreateTeacherScreenState extends State<CreateTeacherScreen> {
                             return;
                           }
                           final teacherData = {
-                            'name': _nameController.text.trim(),
+                            'name': _nameController.text.trim().toUpperCase(),
                             'nuptk': _nuptkController.text.trim(),
                             'password': _passwordController.text.trim(),
                             'role': _role,

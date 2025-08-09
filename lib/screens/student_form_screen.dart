@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+String toTitleCase(String input) {
+  final trimmed = input.trim();
+  if (trimmed.isEmpty) return trimmed;
+  return trimmed.toUpperCase();
+}
+
 class StudentFormScreen extends StatefulWidget {
   final Map<String, dynamic>?
       student; // Pass null for add, or student data for edit
@@ -91,7 +97,7 @@ class _StudentFormScreenState extends State<StudentFormScreen> {
       selectedClass = '';
     }
     final studentData = {
-      'name': _nameController.text.trim(),
+      'name': toTitleCase(_nameController.text),
       'gender': _selectedGender,
       'status': 'active',
       'school_id': widget.userInfo?['school_id'] ??
@@ -467,6 +473,7 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
   int _numberOfStudents = 1;
   bool _isLoading = false;
   List<TextEditingController> _nameControllers = [];
+  List<FocusNode> _nameFocusNodes = [];
   // Removed phone controllers
 
   @override
@@ -476,9 +483,15 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
   }
 
   void _updateControllers() {
+    // Dispose old focus nodes to avoid leaks
+    for (final node in _nameFocusNodes) {
+      node.dispose();
+    }
+    _nameFocusNodes.clear();
     _nameControllers.clear();
     for (int i = 0; i < _numberOfStudents; i++) {
       _nameControllers.add(TextEditingController());
+      _nameFocusNodes.add(FocusNode());
     }
   }
 
@@ -486,6 +499,9 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
   void dispose() {
     for (var controller in _nameControllers) {
       controller.dispose();
+    }
+    for (final node in _nameFocusNodes) {
+      node.dispose();
     }
     
     super.dispose();
@@ -537,7 +553,7 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
 
       // Create students
       for (int i = 0; i < _numberOfStudents; i++) {
-        final name = _nameControllers[i].text.trim();
+        final name = toTitleCase(_nameControllers[i].text);
 
         if (name.isEmpty) continue; // Skip empty names
 
@@ -825,6 +841,18 @@ class _BulkStudentCreationScreenState extends State<BulkStudentCreationScreen> {
                                 const SizedBox(height: 8),
                                 TextFormField(
                                   controller: _nameControllers[index],
+                                  focusNode: _nameFocusNodes[index],
+                                  textInputAction: index < _numberOfStudents - 1
+                                      ? TextInputAction.next
+                                      : TextInputAction.done,
+                                  onFieldSubmitted: (_) {
+                                    if (index < _numberOfStudents - 1) {
+                                      FocusScope.of(context)
+                                          .requestFocus(_nameFocusNodes[index + 1]);
+                                    } else {
+                                      FocusScope.of(context).unfocus();
+                                    }
+                                  },
                                   decoration: InputDecoration(
                                     labelText: 'Nama Lengkap *',
                                     border: OutlineInputBorder(
