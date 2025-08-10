@@ -558,10 +558,29 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
       }
       classSections[className]!.add(item);
     }
+
+    int _extractGrade(String name) {
+      final match = RegExp(r'^(\d+)').firstMatch(name.trim());
+      if (match != null) return int.tryParse(match.group(1)!) ?? 0;
+      final match2 = RegExp(r'Kelas\s+(\d+)').firstMatch(name);
+      if (match2 != null) return int.tryParse(match2.group(1)!) ?? 0;
+      return 0;
+    }
+    String _extractSuffix(String name) {
+      final parts = name.trim().split(RegExp(r'\s+'));
+      return parts.length >= 2 ? parts[1] : '';
+    }
+    final sortedClassNames = classSections.keys.toList()
+      ..sort((a, b) {
+        final ga = _extractGrade(a);
+        final gb = _extractGrade(b);
+        if (ga != gb) return ga.compareTo(gb);
+        return _extractSuffix(a).compareTo(_extractSuffix(b));
+      });
     
-    // Create a sheet for each class
-    for (final className in classSections.keys) {
-      final sheet = excelFile[className];
+    // Create a sheet for each class in sorted order
+    for (final className in sortedClassNames) {
+      final sheet = excelFile['Kelas ' + className];
       final classData = classSections[className]!;
       
       // School name header (row 1)
@@ -666,7 +685,14 @@ class _ArchivedDataScreenState extends State<ArchivedDataScreen> {
         fontColorHex: 'FF1976D2', // Blue color
       );
     }
-    
+
+    // Remove the default sheet if present and empty
+    try {
+      if (excelFile.tables.containsKey('Sheet1') && excelFile['Sheet1'].maxCols == 0 && excelFile['Sheet1'].maxRows == 0) {
+        excelFile.delete('Sheet1');
+      }
+    } catch (_) {}
+
     // Save file with clear naming
     String _slugify(String? s) => (s ?? '')
         .replaceAll(RegExp(r"[\\/:*?\<>|]"), '')

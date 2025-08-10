@@ -731,11 +731,9 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       // Use default 'Sheet1' for summary, then create others by access.
       final String summarySheet = 'Sheet1';
       final String rankingSheet = 'PERINGKAT';
-      final String detailSheet = 'DETAIL';
 
       final summary = book[summarySheet];
-      final ranking = book[rankingSheet];
-      final detail = book[detailSheet];
+      final ranking = _rankingEnabled ? book[rankingSheet] : null;
 
       // Headers and styles for summary sheet
       final sA1 = summary.cell(excel.CellIndex.indexByString('A1'));
@@ -798,8 +796,8 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         }
       } catch (_) {}
 
-      // Ranking sheet
-      // Ranking sheet header and table
+      // Ranking sheet (optional)
+      if (_rankingEnabled && rankings.isNotEmpty && ranking != null) {
       final rA1 = ranking.cell(excel.CellIndex.indexByString('A1'));
       rA1.value = 'Peringkat Siswa (${_sortByStatus.toUpperCase()})';
       rA1.cellStyle = excel.CellStyle(bold: true, fontSize: 14, fontColorHex: 'FF1976D2');
@@ -844,16 +842,113 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         ranking.setColWidth(1, 30);
         ranking.setColWidth(2, 10);
       } catch (_) {}
+      } else {
+        // If ranking is disabled, remove the empty sheet to keep the file neat
+        try {
+          book.delete(rankingSheet);
+        } catch (_) {}
+      }
 
-      // Detail sheet
-      // Detail sheet header and table
-      final dA1 = detail.cell(excel.CellIndex.indexByString('A1'));
-      dA1.value = 'Detail Presensi';
-      dA1.cellStyle = excel.CellStyle(bold: true, fontSize: 14, fontColorHex: 'FF1976D2');
-      const detailHeaders = ['Periode', 'Kelas', 'Guru', 'Siswa', 'Status'];
-      for (int c = 0; c < detailHeaders.length; c++) {
-        final cell = detail.cell(excel.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 2));
-        cell.value = detailHeaders[c];
+      // Build class-specific sheets grouped by date
+      // Prepare period label for sheet headers
+      final periodLabel = (_selectedDate == null)
+          ? 'Semua Periode'
+          : (_reportType == 'daily'
+              ? DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(_selectedDate!)
+              : _reportType == 'monthly'
+                  ? DateFormat('MMMM yyyy', 'id_ID').format(_selectedDate!)
+                  : 'Tahun ${DateFormat('yyyy', 'id_ID').format(_selectedDate!)}');
+
+      // Group detailed records by class then by date
+      final Map<String, Map<String, List<Map<String, dynamic>>>> byClassThenDate = {};
+      for (final rec in detailedRecords) {
+        final cls = (rec['class'] ?? '-') as String;
+        final dateStr = (rec['date'] ?? '-') as String;
+        byClassThenDate.putIfAbsent(cls, () => {});
+        byClassThenDate[cls]!.putIfAbsent(dateStr, () => []);
+        byClassThenDate[cls]![dateStr]!.add(rec);
+      }
+
+      String _safeSheetName(String input, Set<String> used) {
+        String name = input.replaceAll(RegExp(r'[:\\/?*\[\]]'), ' ').trim();
+        if (name.isEmpty) name = 'Kelas';
+        if (name.length > 31) name = name.substring(0, 31);
+        String candidate = name;
+        int suffix = 2;
+        while (used.contains(candidate)) {
+          final base = name.length > 28 ? name.substring(0, 28) : name;
+          candidate = '$base ${suffix++}';
+          if (candidate.length > 31) {
+            candidate = candidate.substring(0, 31);
+          }
+        }
+        used.add(candidate);
+        return candidate;
+      }
+
+      final usedSheetNames = <String>{summarySheet};
+      if (_rankingEnabled) usedSheetNames.add(rankingSheet);
+
+      int _extractGrade(String name) {
+        // Expect formats like "4", "4 A", "06 B", etc. Return leading integer if present
+        final match = RegExp(r'^(\d+)').firstMatch(name.trim());
+        if (match != null) {
+          return int.tryParse(match.group(1)!) ?? 0;
+        }
+        // Fallback: try after the word Kelas
+        final match2 = RegExp(r'Kelas\s+(\d+)').firstMatch(name);
+        if (match2 != null) {
+          return int.tryParse(match2.group(1)!) ?? 0;
+        }
+        return 0;
+      }
+      String _extractSuffix(String name) {
+        // Return class suffix (like A/B/C) for tie-breaker
+        final parts = name.trim().split(RegExp(r'\s+'));
+        if (parts.length >= 2) {
+          return parts[1].toString();
+        }
+        return '';
+      }
+      final classNames = byClassThenDate.keys.toList()
+        ..sort((a, b) {
+          final ga = _extractGrade(a);
+          final gb = _extractGrade(b);
+          if (ga != gb) return ga.compareTo(gb);
+          return _extractSuffix(a).compareTo(_extractSuffix(b));
+        });
+      for (final className in classNames) {
+        final sheetName = "Kelas " + _safeSheetName(className, usedSheetNames);
+        final sheet = book[sheetName];
+
+        // Header rows
+        final hA1 = sheet.cell(excel.CellIndex.indexByString('A1'));
+        hA1.value = 'Detail Presensi - Kelas $className';
+        hA1.cellStyle = excel.CellStyle(bold: true, fontSize: 14, fontColorHex: 'FF1976D2');
+
+        final hA2 = sheet.cell(excel.CellIndex.indexByString('A2'));
+        hA2.value = 'Periode: $periodLabel';
+        hA2.cellStyle = excel.CellStyle(bold: true, fontSize: 12, fontColorHex: 'FF1565C0');
+
+        int row = 4; // start after headers
+
+        final dates = byClassThenDate[className]!.keys.toList()..sort();
+        for (final dateKey in dates) {
+          // Date section header
+          final dateCell = sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row));
+          dateCell.value = 'Tanggal: $dateKey';
+          dateCell.cellStyle = excel.CellStyle(
+            bold: true,
+            fontSize: 12,
+            fontColorHex: 'FF0D47A1',
+          );
+          row++;
+
+          // Table headers for this date
+          const headers = ['No', 'Siswa', 'Guru', 'Status'];
+          for (int c = 0; c < headers.length; c++) {
+            final cell = sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: row));
+            cell.value = headers[c];
         cell.cellStyle = excel.CellStyle(
           bold: true,
           fontSize: 12,
@@ -866,13 +961,16 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
           bottomBorder: excel.Border(borderStyle: excel.BorderStyle.Thin),
         );
       }
-      int dRow = 3;
-      for (final rec in detailedRecords) {
-        final vals = [rec['date'], rec['class'], rec['teacher'], rec['student'], rec['status']];
+          row++;
+
+          final rows = byClassThenDate[className]![dateKey]!;
+          for (int i = 0; i < rows.length; i++) {
+            final r = rows[i];
+            final vals = [i + 1, r['student'], r['teacher'], r['status']];
         for (int c = 0; c < vals.length; c++) {
-          final cell = detail.cell(excel.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: dRow));
+              final cell = sheet.cell(excel.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: row));
           cell.value = vals[c];
-          final even = ((dRow - 2) % 2 == 0);
+              final even = ((row) % 2 == 0);
           cell.cellStyle = excel.CellStyle(
             fontSize: 11,
             backgroundColorHex: even ? 'FFE3F2FD' : 'FFFFFFFF',
@@ -880,18 +978,23 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
             rightBorder: excel.Border(borderStyle: excel.BorderStyle.Thin, borderColorHex: 'FFE0E0E0'),
             topBorder: excel.Border(borderStyle: excel.BorderStyle.Thin, borderColorHex: 'FFE0E0E0'),
             bottomBorder: excel.Border(borderStyle: excel.BorderStyle.Thin, borderColorHex: 'FFE0E0E0'),
-            horizontalAlign: c == 3 ? excel.HorizontalAlign.Left : excel.HorizontalAlign.Center,
-          );
+                horizontalAlign: c == 1 ? excel.HorizontalAlign.Left : excel.HorizontalAlign.Center,
+              );
+            }
+            row++;
+          }
+
+          row++; // spacing between date sections
         }
-        dRow++;
-      }
-      try {
-        detail.setColWidth(0, 14);
-        detail.setColWidth(1, 16);
-        detail.setColWidth(2, 18);
-        detail.setColWidth(3, 28);
-        detail.setColWidth(4, 12);
+
+        // Column widths
+        try {
+          sheet.setColWidth(0, 6);
+          sheet.setColWidth(1, 28);
+          sheet.setColWidth(2, 20);
+          sheet.setColWidth(3, 12);
       } catch (_) {}
+      }
 
       final bytes = book.encode()!;
       final dir = await getApplicationDocumentsDirectory();

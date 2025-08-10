@@ -616,8 +616,7 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
     sheet.cell(excel.CellIndex.indexByString('B6')).value = _studentData!['gender'] ?? '';
     sheet.cell(excel.CellIndex.indexByString('A7')).value = 'Status';
     sheet.cell(excel.CellIndex.indexByString('B7')).value = _getStatusDisplay(_studentData!['status']);
-    sheet.cell(excel.CellIndex.indexByString('A8')).value = 'No. HP Orang Tua';
-    sheet.cell(excel.CellIndex.indexByString('B8')).value = _studentData!['parent_phone'] ?? '';
+    // Removed parent phone from Excel export per privacy requirement
     
     // Attendance section header
     sheet.cell(excel.CellIndex.indexByString('A10')).value = 'RIWAYAT KEHADIRAN';
@@ -794,7 +793,6 @@ class _StudentDetailsScreenState extends State<StudentDetailsScreen> {
                     _buildPDFInfoRow('Nama', _studentData!['name'] ?? ''),
                     _buildPDFInfoRow('Jenis Kelamin', _studentData!['gender'] ?? ''),
                     _buildPDFInfoRow('Status', _getStatusDisplay(_studentData!['status'])),
-                    _buildPDFInfoRow('No. HP Orang Tua', _studentData!['parent_phone'] ?? ''),
                   ],
                 ),
               ],

@@ -121,7 +121,7 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('Buat Kelas Baru'),
+        title: Text(widget.classData != null ? 'Edit Kelas' : 'Buat Kelas Baru'),
         backgroundColor: Colors.white,
         elevation: 1,
       ),
@@ -200,7 +200,7 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
                     icon: _isLoading
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.save_outlined),
-                    label: const Text('Simpan Kelas'),
+                    label: Text(widget.classData != null ? 'Perbarui Kelas' : 'Simpan Kelas'),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

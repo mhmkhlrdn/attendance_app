@@ -17,6 +17,45 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
   String _search = '';
   String? _dayFilter;
   String? _typeFilter;
+  List<String>? _teacherIds; // for role guru: [nuptk, teacherDocId]
+  bool _loadingTeacher = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.role == 'guru') {
+      _loadTeacherIds();
+    }
+  }
+
+  Future<void> _loadTeacherIds() async {
+    setState(() => _loadingTeacher = true);
+    try {
+      final nuptk = widget.userInfo['nuptk'];
+      final List<String> ids = [];
+      if (nuptk != null && nuptk.isNotEmpty) ids.add(nuptk);
+
+      if (nuptk != null && nuptk.isNotEmpty) {
+        final teacherQuery = await FirebaseFirestore.instance
+            .collection('teachers')
+            .where('nuptk', isEqualTo: nuptk)
+            .limit(1)
+            .get();
+        if (teacherQuery.docs.isNotEmpty) {
+          ids.add(teacherQuery.docs.first.id);
+        }
+      }
+      setState(() {
+        _teacherIds = ids.isEmpty ? null : ids;
+        _loadingTeacher = false;
+      });
+    } catch (_) {
+      setState(() {
+        _teacherIds = null;
+        _loadingTeacher = false;
+      });
+    }
+  }
 
   Future<String> _resolveClassName(String? classId) async {
     if (classId == null || classId.isEmpty) return '-';
@@ -116,7 +155,18 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance.collection('schedules');
     if (widget.role == 'guru') {
-      query = query.where('teacher_id', isEqualTo: widget.userInfo['nuptk']);
+      // Wait for teacher IDs to resolve
+      if (_loadingTeacher || _teacherIds == null || _teacherIds!.isEmpty) {
+        return const Scaffold(
+          backgroundColor: Colors.white,
+          body: Center(child: CircularProgressIndicator()),
+        );
+      }
+      if (_teacherIds!.length == 1) {
+        query = query.where('teacher_id', isEqualTo: _teacherIds!.first);
+      } else {
+        query = query.where('teacher_id', whereIn: _teacherIds);
+      }
     } else if (widget.role == 'admin') {
       query = query.where('school_id', isEqualTo: widget.userInfo['school_id']);
     }
