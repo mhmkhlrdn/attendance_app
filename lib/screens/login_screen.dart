@@ -115,6 +115,8 @@ class _LoginScreenState extends State<LoginScreen> {
         'role': teacherData['role'] ?? 'guru',
         'school_id': _selectedSchoolId!,
         'school_name': _schools.firstWhere((s) => s['id'] == _selectedSchoolId)['name'],
+        // For saved accounts quick-fill
+        'password': password,
       };
 
       await LocalStorageService.saveUserInfo(userInfo);
@@ -193,6 +195,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 final name = acc['name'] ?? '-';
                                 final nuptk = acc['nuptk'] ?? '';
                                 final role = acc['role'] ?? '';
+                                final password = acc['password'] ?? '';
                                 final school = acc['school_name'] ?? (acc['school_id'] ?? '');
                                 return Padding(
                                   padding: const EdgeInsets.only(right: 8.0, bottom: 12.0),
@@ -204,10 +207,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                       style: const TextStyle(color: Colors.white),
                                     ),
                                     onSelected: (_) {
-                                      // Quick switch: prefill NUPTK and school, then focus password
                                       setState(() {
                                         _nuptkController.text = nuptk;
                                         _selectedSchoolId = acc['school_id'];
+                                        _passwordController.text = password;
                                       });
                                     },
                                     onDeleted: () async {
