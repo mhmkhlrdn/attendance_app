@@ -8,6 +8,7 @@ class LocalStorageService {
   static const String _teacherSchedulesKey = 'teacher_schedules';
   static const String _pendingAttendanceKey = 'pending_attendance';
   static const String _lastSyncKey = 'last_sync';
+  static const String _savedAccountsKey = 'saved_accounts';
 
   /// Save user information locally
   static Future<void> saveUserInfo(Map<String, String> userInfo) async {
@@ -47,6 +48,70 @@ class LocalStorageService {
     await prefs.remove(_teacherSchedulesKey);
     await prefs.remove(_pendingAttendanceKey);
     await prefs.remove(_lastSyncKey);
+  }
+
+  /// Save or update a saved account for quick switching on login screen
+  static Future<void> addSavedAccount(Map<String, String> userInfo) async {
+    final prefs = await SharedPreferences.getInstance();
+    final existingString = prefs.getString(_savedAccountsKey);
+    List<Map<String, String>> accounts = [];
+    if (existingString != null) {
+      try {
+        final list = jsonDecode(existingString) as List<dynamic>;
+        accounts = list.map((e) => Map<String, String>.from(e as Map)).toList();
+      } catch (e) {
+        // Corrupted; reset
+        accounts = [];
+      }
+    }
+
+    final newKey = _accountKey(userInfo);
+    bool updated = false;
+    for (int i = 0; i < accounts.length; i++) {
+      if (_accountKey(accounts[i]) == newKey) {
+        accounts[i] = userInfo;
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) {
+      accounts.add(userInfo);
+    }
+
+    await prefs.setString(_savedAccountsKey, jsonEncode(accounts));
+  }
+
+  /// Get list of saved accounts
+  static Future<List<Map<String, String>>> getSavedAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existingString = prefs.getString(_savedAccountsKey);
+    if (existingString == null) return [];
+    try {
+      final list = jsonDecode(existingString) as List<dynamic>;
+      return list.map((e) => Map<String, String>.from(e as Map)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Remove a saved account by identifier fields
+  static Future<void> removeSavedAccount({required String nuptk, required String schoolId, String? role}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = await getSavedAccounts();
+    existing.removeWhere((acc) {
+      final sameUser = (acc['nuptk'] ?? '') == nuptk;
+      final sameSchool = (acc['school_id'] ?? '') == schoolId;
+      final sameRole = role == null || (acc['role'] ?? '') == role;
+      return sameUser && sameSchool && sameRole;
+    });
+    await prefs.setString(_savedAccountsKey, jsonEncode(existing));
+  }
+
+  static String _accountKey(Map<String, String> userInfo) {
+    final nuptk = userInfo['nuptk'] ?? '';
+    final schoolId = userInfo['school_id'] ?? '';
+    final role = userInfo['role'] ?? '';
+    return '$nuptk|$schoolId|$role';
   }
 
   /// Save teacher's classes locally

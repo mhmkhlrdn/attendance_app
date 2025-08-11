@@ -33,6 +33,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? currentYearId;
   bool canEdit = false;
   DateTime? _scheduleEndTime;
+  // New: support multiple concurrent schedules
+  List<Map<String, dynamic>> _currentSchedules = [];
+  List<String> _currentScheduleIds = [];
+  int _activeScheduleIndex = 0;
 
   @override
   void initState() {
@@ -111,6 +115,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       DateTime? nearestTime;
       Map<String, dynamic>? nearestSchedule;
 
+      // New: collect all schedules that are currently active
+      _currentSchedules = [];
+      _currentScheduleIds = [];
+
       for (var doc in scheduleSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
         final scheduleType = data['schedule_type'] ?? 'subject_specific';
@@ -130,11 +138,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           print('  Is within morning time: ${currentTime >= morningTime && currentTime <= morningEndTime}');
           
           if (currentTime >= morningTime && currentTime <= morningEndTime) {
-            foundSchedule = data;
-            foundScheduleId = doc.id;
+            // add to concurrent schedules
+            _currentSchedules.add(data);
+            _currentScheduleIds.add(doc.id);
+            // set one as found if none set yet
+            foundSchedule ??= data;
+            foundScheduleId ??= doc.id;
             _scheduleEndTime = DateTime(now.year, now.month, now.day, 8, 30);
-            print('  ✓ FOUND DAILY MORNING SCHEDULE!');
-            break;
+            print('  ✓ FOUND DAILY MORNING SCHEDULE! (collecting)');
           }
         } else if (scheduleType == 'subject_specific') {
           if (data['time'] != null) {
@@ -169,11 +180,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 print('    Is within time: ${nowMinutes >= startMinutes && nowMinutes <= endMinutes}');
                 
                 if (nowMinutes >= startMinutes && nowMinutes <= endMinutes) {
-                  foundSchedule = data;
-                  foundScheduleId = doc.id;
+                  // add to concurrent schedules
+                  _currentSchedules.add(data);
+                  _currentScheduleIds.add(doc.id);
+                  // set one as found if none set yet
+                  foundSchedule ??= data;
+                  foundScheduleId ??= doc.id;
                   _scheduleEndTime = DateTime(now.year, now.month, now.day, endHour, endMinute);
-                  print('    ✓ FOUND SUBJECT-SPECIFIC SCHEDULE!');
-                  break;
+                  print('    ✓ FOUND SUBJECT-SPECIFIC SCHEDULE! (collecting)');
                 } else if (startMinutes > nowMinutes) {
                   final scheduleDateTime = DateTime(now.year, now.month, now.day, startHour, startMinute);
                   if (nearestTime == null || scheduleDateTime.isBefore(nearestTime)) {
@@ -204,7 +218,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }
       }
 
-      if (foundSchedule == null) {
+      if (_currentSchedules.isEmpty && foundSchedule == null) {
         print('\n✗ NO SCHEDULE FOUND!');
         print('Nearest schedule: ${nearestSchedule != null ? nearestSchedule['time'] : 'None'}');
         
@@ -232,16 +246,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         return;
       }
 
-      print('\n✓ SCHEDULE FOUND!');
-      print('Schedule ID: $scheduleId');
-      print('Class ID: $classId');
-      print('Schedule data: $foundSchedule');
+      // Choose active index based on first found
+      if (_currentSchedules.isEmpty && foundSchedule != null) {
+        _currentSchedules.add(foundSchedule);
+        _currentScheduleIds.add(foundScheduleId ?? '');
+      }
+      _activeScheduleIndex = 0;
 
-      classId = foundSchedule['class_id'];
-      scheduleId = foundScheduleId;
-      scheduleType = foundSchedule['schedule_type'];
-      scheduleSubject = foundSchedule['subject'];
-      scheduleTime = foundSchedule['time'];
+      print('\n✓ SCHEDULE(S) FOUND! Count: ${_currentSchedules.length}');
+      print('Active schedule index: $_activeScheduleIndex');
+
+      final active = _currentSchedules[_activeScheduleIndex];
+      classId = active['class_id'];
+      scheduleId = _currentScheduleIds[_activeScheduleIndex];
+      scheduleType = active['schedule_type'];
+      scheduleSubject = active['subject'];
+      scheduleTime = active['time'];
       // Determine editability
       if (_scheduleEndTime != null) {
         canEdit = DateTime.now().isBefore(_scheduleEndTime!) || DateTime.now().isAtSameMomentAs(_scheduleEndTime!);
@@ -393,6 +413,27 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ) : null,
+        actions: [
+          if (!isLoading && errorMsg == null && _currentSchedules.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: Center(
+                child: _ScheduleSwitcher(
+                  schedules: _currentSchedules,
+                  activeIndex: _activeScheduleIndex,
+                  onChanged: (index) async {
+                    setState(() {
+                      _activeScheduleIndex = index;
+                      attendance = {};
+                      attendanceExistsToday = false;
+                      attendanceDocId = null;
+                    });
+                    await _reloadForActiveSchedule();
+                  },
+                ),
+              ),
+            ),
+        ],
       ),
       body: isLoading
         ? const Center(child: CircularProgressIndicator())
@@ -569,6 +610,106 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             backgroundColor: Colors.teal,
           ),
     );
+  }
+
+  Future<void> _reloadForActiveSchedule() async {
+    try {
+      final active = _currentSchedules[_activeScheduleIndex];
+      final now = DateTime.now();
+      final nuptk = widget.userInfo?['nuptk'] ?? '';
+
+      // Update state from active schedule
+      setState(() {
+        classId = active['class_id'];
+        scheduleId = _currentScheduleIds[_activeScheduleIndex];
+        scheduleType = active['schedule_type'];
+        scheduleSubject = active['subject'];
+        scheduleTime = active['time'];
+      });
+
+      // Determine end time if subject_specific
+      _scheduleEndTime = null;
+      if (scheduleType == 'subject_specific' && scheduleTime != null) {
+        final regex = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})');
+        final match = regex.firstMatch(scheduleTime!);
+        if (match != null) {
+          final endHour = int.parse(match.group(3)!);
+          final endMinute = int.parse(match.group(4)!);
+          _scheduleEndTime = DateTime(now.year, now.month, now.day, endHour, endMinute);
+        }
+      } else if (scheduleType == 'daily_morning') {
+        _scheduleEndTime = DateTime(now.year, now.month, now.day, 8, 30);
+      }
+      canEdit = _scheduleEndTime != null && (DateTime.now().isBefore(_scheduleEndTime!) || DateTime.now().isAtSameMomentAs(_scheduleEndTime!));
+
+      // Reload attendance existence for this schedule
+      final today = DateTime(now.year, now.month, now.day);
+      final tomorrow = today.add(const Duration(days: 1));
+      final attendanceQuery = await FirebaseFirestore.instance
+          .collection('attendances')
+          .where('schedule_id', isEqualTo: scheduleId)
+          .where('teacher_id', isEqualTo: nuptk)
+          .where('date', isGreaterThanOrEqualTo: today)
+          .where('date', isLessThan: tomorrow)
+          .limit(1)
+          .get();
+      if (attendanceQuery.docs.isNotEmpty) {
+        attendanceExistsToday = true;
+        attendanceDocId = attendanceQuery.docs.first.id;
+        final attData = attendanceQuery.docs.first.data() as Map<String, dynamic>;
+        final attMap = attData['attendance'] as Map?;
+        if (attMap != null) {
+          attendance = Map<String, String>.from(attMap);
+        }
+      } else {
+        attendanceExistsToday = false;
+        attendanceDocId = null;
+        attendance = {};
+      }
+
+      // Reload students for class
+      final classDoc = await FirebaseFirestore.instance.collection('classes').doc(classId).get();
+      if (!classDoc.exists) {
+        setState(() {
+          errorMsg = 'Kelas tidak ditemukan.';
+          students = [];
+        });
+        return;
+      }
+      final classData = classDoc.data() as Map<String, dynamic>;
+      final studentIds = List<String>.from(classData['students'] ?? []);
+      List<QueryDocumentSnapshot> allStudentDocs = [];
+      const batchSize = 10;
+      for (int i = 0; i < studentIds.length; i += batchSize) {
+        final end = (i + batchSize < studentIds.length) ? i + batchSize : studentIds.length;
+        final batchIds = studentIds.sublist(i, end);
+        final batchQuery = await FirebaseFirestore.instance
+            .collection('students')
+            .where(FieldPath.documentId, whereIn: batchIds)
+            .get();
+        allStudentDocs.addAll(batchQuery.docs);
+      }
+      final studentsList = allStudentDocs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return {'id': doc.id, ...data};
+      }).toList();
+      studentsList.sort((a, b) {
+        final aName = (a['name'] as String? ?? '').trim();
+        final bName = (b['name'] as String? ?? '').trim();
+        if (aName.isEmpty && bName.isEmpty) return 0;
+        if (aName.isEmpty) return 1;
+        if (bName.isEmpty) return -1;
+        return aName.toLowerCase().compareTo(bName.toLowerCase());
+      });
+      setState(() {
+        students = studentsList;
+        className = classData['grade'].toString() + (classData['class_name'] ?? '');
+      });
+    } catch (e) {
+      setState(() {
+        errorMsg = 'Gagal memuat ulang data jadwal: $e';
+      });
+    }
   }
 
   String _getScheduleSubject() {
@@ -790,6 +931,64 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         );
       }
     }
+  }
+}
+
+class _ScheduleSwitcher extends StatelessWidget {
+  final List<Map<String, dynamic>> schedules;
+  final int activeIndex;
+  final ValueChanged<int> onChanged;
+
+  const _ScheduleSwitcher({
+    Key? key,
+    required this.schedules,
+    required this.activeIndex,
+    required this.onChanged,
+  }) : super(key: key);
+
+  String _labelFor(Map<String, dynamic> s) {
+    final subject = s['subject'] ?? '';
+    final classId = s['class_id'] ?? '';
+    final time = s['time'] ?? '';
+    return subject.toString().isNotEmpty
+        ? '$subject • $classId\n$time'
+        : '$classId\n$time';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (schedules.length <= 1) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left, color: Colors.white),
+          onPressed: activeIndex > 0 ? () => onChanged(activeIndex - 1) : null,
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Text('Jadwal', style: TextStyle(color: Colors.white70, fontSize: 11)),
+              Text(
+                _labelFor(schedules[activeIndex]),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_right, color: Colors.white),
+          onPressed: activeIndex < schedules.length - 1 ? () => onChanged(activeIndex + 1) : null,
+        ),
+      ],
+    );
   }
 }
 

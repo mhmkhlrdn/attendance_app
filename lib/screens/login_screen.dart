@@ -18,11 +18,17 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _selectedSchoolId;
   List<Map<String, dynamic>> _schools = [];
   bool _isLoadingSchools = true;
+  List<Map<String, String>> _savedAccounts = [];
 
   @override
   void initState() {
     super.initState();
-    _loadSchools();
+    _loadInitial();
+  }
+
+  Future<void> _loadInitial() async {
+    await _loadSchools();
+    await _loadSavedAccounts();
   }
 
   Future<void> _loadSchools() async {
@@ -44,6 +50,15 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       print('Error loading schools: $e');
       setState(() => _isLoadingSchools = false);
+    }
+  }
+
+  Future<void> _loadSavedAccounts() async {
+    final accounts = await LocalStorageService.getSavedAccounts();
+    if (mounted) {
+      setState(() {
+        _savedAccounts = accounts;
+      });
     }
   }
 
@@ -103,6 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
       };
 
       await LocalStorageService.saveUserInfo(userInfo);
+      await LocalStorageService.addSavedAccount(userInfo);
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -156,6 +172,59 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (_savedAccounts.isNotEmpty) ...[
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0),
+                              child: Text(
+                                'Akun tersimpan',
+                                style: TextStyle(
+                                  color: Colors.teal.shade700,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: _savedAccounts.map((acc) {
+                                final name = acc['name'] ?? '-';
+                                final nuptk = acc['nuptk'] ?? '';
+                                final role = acc['role'] ?? '';
+                                final school = acc['school_name'] ?? (acc['school_id'] ?? '');
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 8.0, bottom: 12.0),
+                                  child: InputChip(
+                                    avatar: const Icon(Icons.account_circle, color: Colors.white),
+                                    backgroundColor: Colors.teal,
+                                    label: Text(
+                                      '$name\n$role • $school',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                    onSelected: (_) {
+                                      // Quick switch: prefill NUPTK and school, then focus password
+                                      setState(() {
+                                        _nuptkController.text = nuptk;
+                                        _selectedSchoolId = acc['school_id'];
+                                      });
+                                    },
+                                    onDeleted: () async {
+                                      await LocalStorageService.removeSavedAccount(
+                                        nuptk: nuptk,
+                                        schoolId: acc['school_id'] ?? '',
+                                        role: role,
+                                      );
+                                      await _loadSavedAccounts();
+                                    },
+                                    deleteIcon: const Icon(Icons.close, size: 18, color: Colors.white),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ],
                         // Logo/Icon
                         Container(
                           width: 80,
