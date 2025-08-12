@@ -33,7 +33,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? currentYearId;
   bool canEdit = false;
   DateTime? _scheduleEndTime;
-  // New: support multiple concurrent schedules
   List<Map<String, dynamic>> _currentSchedules = [];
   List<String> _currentScheduleIds = [];
   int _activeScheduleIndex = 0;
@@ -128,13 +127,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           final currentTime = now.hour * 60 + now.minute;
           final morningTime = 6 * 60 + 30;
           final morningEndTime = 12 * 60 + 30;
-
+          
           if (currentTime >= morningTime && currentTime <= morningEndTime) {
             _currentSchedules.add(data);
             _currentScheduleIds.add(doc.id);
             foundSchedule ??= data;
             foundScheduleId ??= doc.id;
-            _scheduleEndTime = DateTime(now.year, now.month, now.day, 8, 30);
+                _scheduleEndTime = DateTime(now.year, now.month, now.day, 12, 30);
           }
         } else if (scheduleType == 'subject_specific') {
           if (data['time'] != null) {
@@ -285,9 +284,40 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }
         print('✓ Attendance already exists for today');
       } else {
-        attendanceExistsToday = false;
-        attendanceDocId = null;
-        print('No existing attendance found');
+        // Try to load pending offline attendance for today
+        final pendingList = await LocalStorageService.getPendingAttendance();
+        final todayOnly = DateTime(now.year, now.month, now.day);
+        Map<String, dynamic>? pendingMatch;
+        for (final p in pendingList) {
+          if ((p['schedule_id'] as String?) != scheduleId || (p['teacher_id'] as String?) != nuptk) continue;
+          final pDate = p['date'];
+          DateTime? pDay;
+          if (pDate is DateTime) {
+            pDay = DateTime(pDate.year, pDate.month, pDate.day);
+          } else if (pDate is String) {
+            try {
+              final d = DateTime.parse(pDate);
+              pDay = DateTime(d.year, d.month, d.day);
+            } catch (_) {}
+          }
+          if (pDay != null && pDay == todayOnly) {
+            pendingMatch = p;
+            break;
+          }
+        }
+        if (pendingMatch != null) {
+          final attMap = pendingMatch['attendance'] as Map?;
+          if (attMap != null) {
+            attendance = Map<String, String>.from(attMap);
+          }
+          attendanceExistsToday = true;
+          attendanceDocId = null;
+          print('Loaded pending offline attendance for today');
+        } else {
+          attendanceExistsToday = false;
+          attendanceDocId = null;
+          print('No existing attendance found');
+        }
       }
 
       // Load students for this class from the class document
@@ -477,10 +507,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           ],
                         ),
                         const SizedBox(height: 12),
-                         Text(
+                        Text(
                            'Kelas: ${className ?? '-'}',
-                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-                         ),
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
                         const SizedBox(height: 4),
                         Text(
                           'Jenis: ${_getScheduleTypeDisplay()}',
@@ -533,36 +563,38 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                for (var student in students) {
-                                  attendance[student['id']] = 'alfa';
-                                }
-                              });
-                            },
-                            icon: const Icon(Icons.cancel),
-                            label: const Text('Alfa Semua'),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                          ),
-                        ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                  // Search bar that scrolls to matching student
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Cari siswa (nama)...',
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (query) {
+                        _scrollToStudent(query);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                 ],
                 
                 // Students List
                 Expanded(
                   child: ListView.builder(
+                    controller: _listController,
                     padding: const EdgeInsets.only(bottom: 80), // Add bottom padding for FAB
                     itemCount: students.length,
                     itemBuilder: (context, index) {
                       final s = students[index];
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        key: _itemKeys.putIfAbsent(index, () => GlobalKey(debugLabel: 'student_$index')),
                         child: ListTile(
                           title: Text(s['name'] ?? 'Nama tidak tersedia'),
                           trailing: canEdit 
@@ -631,7 +663,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           _scheduleEndTime = DateTime(now.year, now.month, now.day, endHour, endMinute);
         }
       } else if (scheduleType == 'daily_morning') {
-        _scheduleEndTime = DateTime(now.year, now.month, now.day, 8, 30);
+        _scheduleEndTime = DateTime(now.year, now.month, now.day, 12, 30);
       }
       canEdit = _scheduleEndTime != null && (DateTime.now().isBefore(_scheduleEndTime!) || DateTime.now().isAtSameMomentAs(_scheduleEndTime!));
 
@@ -655,9 +687,41 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           attendance = Map<String, String>.from(attMap);
         }
       } else {
-        attendanceExistsToday = false;
-        attendanceDocId = null;
-        attendance = {};
+        // Load pending offline attendance for today if exists
+        final pendingList = await LocalStorageService.getPendingAttendance();
+        final todayOnly = DateTime(now.year, now.month, now.day);
+        Map<String, dynamic>? pendingMatch;
+        for (final p in pendingList) {
+          if ((p['schedule_id'] as String?) != scheduleId || (p['teacher_id'] as String?) != nuptk) continue;
+          final pDate = p['date'];
+          DateTime? pDay;
+          if (pDate is DateTime) {
+            pDay = DateTime(pDate.year, pDate.month, pDate.day);
+          } else if (pDate is String) {
+            try {
+              final d = DateTime.parse(pDate);
+              pDay = DateTime(d.year, d.month, d.day);
+            } catch (_) {}
+          }
+          if (pDay != null && pDay == todayOnly) {
+            pendingMatch = p;
+            break;
+          }
+        }
+        if (pendingMatch != null) {
+          final attMap = pendingMatch['attendance'] as Map?;
+          if (attMap != null) {
+            attendance = Map<String, String>.from(attMap);
+          } else {
+            attendance = {};
+          }
+          attendanceExistsToday = true;
+          attendanceDocId = null;
+        } else {
+          attendanceExistsToday = false;
+          attendanceDocId = null;
+          attendance = {};
+        }
       }
 
       // Reload students for class
@@ -866,55 +930,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           });
         }
       } else {
-        // Offline: Check pending attendance to avoid duplicates
+        // Offline: create or update pending attendance for today (idempotent)
         final pendingAttendance = await LocalStorageService.getPendingAttendance();
         final today = DateTime(now.year, now.month, now.day);
-        
-        // Check if we already have pending attendance for today
         final hasPendingToday = pendingAttendance.any((pending) {
           final pendingScheduleId = pending['schedule_id'] as String?;
           final pendingTeacherId = pending['teacher_id'] as String?;
           final pendingDate = pending['date'];
-          
-          if (pendingScheduleId != scheduleId || pendingTeacherId != userInfo['nuptk']) {
-            return false;
-          }
-          
-          // Handle both DateTime and String date formats
+          if (pendingScheduleId != scheduleId || pendingTeacherId != userInfo['nuptk']) return false;
           DateTime? pendingDateTime;
           if (pendingDate is DateTime) {
             pendingDateTime = pendingDate;
           } else if (pendingDate is String) {
-            try {
-              pendingDateTime = DateTime.parse(pendingDate);
-            } catch (e) {
-              print('Error parsing pending date: $e');
-              return false;
-            }
-          } else {
-            return false;
-          }
-          
-          // Compare dates (ignore time)
-          return pendingDateTime.year == today.year &&
-                 pendingDateTime.month == today.month &&
-                 pendingDateTime.day == today.day;
+            try { pendingDateTime = DateTime.parse(pendingDate); } catch (_) { return false; }
+          } else { return false; }
+          return pendingDateTime.year == today.year && pendingDateTime.month == today.month && pendingDateTime.day == today.day;
         });
 
-        if (hasPendingToday && !attendanceExistsToday) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Presensi offline untuk hari ini sudah ada!'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-          return;
-        }
-
-        // Save to local storage for later sync
-        await LocalStorageService.savePendingAttendance(attendanceData);
+        await LocalStorageService.savePendingAttendance({
+          ...attendanceData,
+          'date': (attendanceData['date'] as DateTime).toIso8601String(),
+          'local_timestamp': DateTime.now().toIso8601String(),
+        });
         
         // Set attendance as taken for today
         setState(() {
@@ -923,8 +960,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Presensi disimpan offline. Akan disinkronkan saat online.'),
+            SnackBar(
+              content: Text(hasPendingToday ? 'Perubahan presensi disimpan offline.' : 'Presensi disimpan offline. Akan disinkronkan saat online.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -955,6 +992,44 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       }
     }
   }
+
+  void _scrollToStudent(String query) {
+    if (query.trim().isEmpty) return;
+    final idx = students.indexWhere((s) => ((s['name'] ?? '') as String).toLowerCase().contains(query.toLowerCase()));
+    if (idx >= 0) {
+      final key = _itemKeys[idx];
+      if (key != null && key.currentContext != null) {
+        Scrollable.ensureVisible(
+          key.currentContext!,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        // Rough scroll to position to force build, then ensureVisible
+        const estimatedItemExtent = 80.0; // approximate height of each card row
+        final targetOffset = (idx * estimatedItemExtent).clamp(0, _listController.position.maxScrollExtent).toDouble();
+        _listController.animateTo(
+          targetOffset,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        ).then((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final ctx = _itemKeys[idx]?.currentContext;
+            if (ctx != null) {
+              Scrollable.ensureVisible(
+                ctx,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+              );
+            }
+          });
+        });
+      }
+    }
+  }
+
+  final Map<int, GlobalKey> _itemKeys = {};
+  final ScrollController _listController = ScrollController();
 }
 
 class _ScheduleSwitcher extends StatelessWidget {

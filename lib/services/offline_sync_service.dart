@@ -28,17 +28,69 @@ class OfflineSyncService {
         return;
       }
 
-      print('Syncing ${pendingAttendance.length} pending attendance records...');
+      // Deduplicate by (schedule_id, teacher_id, date YYYY-MM-DD) keeping the latest local_timestamp
+      final Map<String, Map<String, dynamic>> latestByKey = {};
+      DateTime _parseTs(dynamic v) {
+        if (v is DateTime) return v;
+        if (v is String) {
+          try { return DateTime.parse(v); } catch (_) {}
+        }
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
+      String _dateKey(dynamic dateVal) {
+        if (dateVal is DateTime) return dateVal.toIso8601String().split('T')[0];
+        if (dateVal is String) return dateVal.split('T')[0];
+        return '';
+      }
+      for (final att in pendingAttendance) {
+        final sid = att['schedule_id'] as String? ?? '';
+        final tid = att['teacher_id'] as String? ?? '';
+        final dkey = _dateKey(att['date']);
+        if (sid.isEmpty || tid.isEmpty || dkey.isEmpty) continue;
+        final key = '$sid|$tid|$dkey';
+        final currentTs = _parseTs(att['local_timestamp']);
+        if (!latestByKey.containsKey(key)) {
+          latestByKey[key] = att;
+        } else {
+          final existingTs = _parseTs(latestByKey[key]!['local_timestamp']);
+          if (currentTs.isAfter(existingTs)) {
+            latestByKey[key] = att;
+          }
+        }
+      }
 
-      // Process each attendance record
-      for (var attendanceData in pendingAttendance) {
+      final toSync = latestByKey.values.toList();
+      print('Syncing ${toSync.length} pending attendance records (deduped from ${pendingAttendance.length})...');
+
+      // Process each attendance record (latest only per day)
+      for (var attendanceData in toSync) {
         print('Processing attendance: class=${attendanceData['class_id']}, date=${attendanceData['date']}, type=${attendanceData['date'].runtimeType}');
         try {
           // Check if attendance already exists to prevent duplicates
           final existingAttendance = await _checkExistingAttendance(attendanceData);
           if (existingAttendance) {
-            print('Attendance already exists for class: ${attendanceData['class_id']}, date: ${attendanceData['date']}. Removing from pending...');
-            // Remove this pending record since it already exists
+            // If a record exists for that day/schedule/teacher, update it instead of skipping
+            final cleanData = Map<String, dynamic>.from(attendanceData);
+            if (cleanData['date'] is String) {
+              cleanData['date'] = DateTime.parse(cleanData['date'] as String);
+            }
+            final startOfDay = DateTime(cleanData['date'].year, cleanData['date'].month, cleanData['date'].day);
+            final endOfDay = startOfDay.add(const Duration(days: 1));
+            final query = await _firestore
+                .collection('attendances')
+                .where('schedule_id', isEqualTo: cleanData['schedule_id'])
+                .where('teacher_id', isEqualTo: cleanData['teacher_id'])
+                .where('date', isGreaterThanOrEqualTo: startOfDay)
+                .where('date', isLessThan: endOfDay)
+                .limit(1)
+                .get();
+            if (query.docs.isNotEmpty) {
+              await _firestore.collection('attendances').doc(query.docs.first.id).update({
+                'attendance': cleanData['attendance'],
+                'student_ids': cleanData['student_ids'],
+                'updated_at': FieldValue.serverTimestamp(),
+              });
+              // Remove from pending after successful update
             final dateValue = attendanceData['date'];
             String dateString;
             if (dateValue is DateTime) {
@@ -46,15 +98,15 @@ class OfflineSyncService {
             } else if (dateValue is String) {
               dateString = dateValue;
             } else {
-              print('Invalid date format for removal: $dateValue');
               continue;
             }
-            await LocalStorageService.removePendingAttendance(
-              attendanceData['schedule_id'] as String,
-              attendanceData['teacher_id'] as String,
-              dateString,
-            );
+              await LocalStorageService.removePendingAttendance(
+                attendanceData['schedule_id'] as String,
+                attendanceData['teacher_id'] as String,
+                dateString,
+              );
             continue;
+            }
           }
 
           final cleanData = Map<String, dynamic>.from(attendanceData);
@@ -287,10 +339,10 @@ class OfflineSyncService {
           final scheduleType = schedule['schedule_type'] ?? 'subject_specific';
           
           if (scheduleType == 'daily_morning') {
-            // Check if it's morning time (6:30 AM to 8:30 AM)
+            // Morning window: 6:30 AM to 12:30 PM
             final currentMinutes = now.hour * 60 + now.minute;
-            final morningStart = 6 * 60 + 30; // 6:30 AM
-            final morningEnd = 8 * 60 + 30; // 8:30 AM
+            final morningStart = 6 * 60 + 30;
+            final morningEnd = 12 * 60 + 30;
             
             if (currentMinutes >= morningStart && currentMinutes <= morningEnd) {
               return {
@@ -330,10 +382,10 @@ class OfflineSyncService {
           final scheduleType = schedule['schedule_type'] ?? 'subject_specific';
           
           if (scheduleType == 'daily_morning') {
-            // Check if it's morning time (6:30 AM to 8:30 AM)
+            // Morning window: 6:30 AM to 12:30 PM
             final currentMinutes = now.hour * 60 + now.minute;
-            final morningStart = 6 * 60 + 30; // 6:30 AM
-            final morningEnd = 8 * 60 + 30; // 8:30 AM
+            final morningStart = 6 * 60 + 30;
+            final morningEnd = 12 * 60 + 30;
             
             if (currentMinutes >= morningStart && currentMinutes <= morningEnd) {
               return schedule;
@@ -447,3 +499,4 @@ class OfflineSyncService {
     return int.parse(parts[0]) * 60 + int.parse(parts[1]);
   }
 } 
+    

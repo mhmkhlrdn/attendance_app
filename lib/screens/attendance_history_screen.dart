@@ -916,44 +916,62 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       dateToAttendances.putIfAbsent(dayStart, () => []).add(attendance);
     }
     final datesForTimetable = dateToAttendances.keys.toList()..sort();
-    // --- Build columns: for each date, one column per teacher (if admin) ---
+    // --- Build columns: one per date for teacher; for admin, one per teacher per date (merged across classes) ---
     List<_TimetableColumn> timetableColumns = [];
     for (final date in datesForTimetable) {
       final attendances = dateToAttendances[date]!;
-      if (widget.role == 'admin' && attendances.length > 1) {
-        // Multiple teachers: one column per teacher
-        attendances.sort((a, b) {
-          final tA = _teacherNames[(a['data'] as Map<String, dynamic>)['teacher_id']] ?? '';
-          final tB = _teacherNames[(b['data'] as Map<String, dynamic>)['teacher_id']] ?? '';
-          return tA.compareTo(tB);
-        });
-        for (var att in attendances) {
-          final teacherId = (att['data'] as Map<String, dynamic>)['teacher_id'] as String?;
-          final teacherName = teacherId != null ? _teacherNames[teacherId] ?? 'Unknown' : 'Unknown';
-          final type = (() {
-            final scheduleId = (att['data'] as Map<String, dynamic>)['schedule_id'] as String?;
-            if (scheduleId != null) {
-              final scheduleType = dateTypeMap[date] ?? '';
-              return scheduleType;
+
+      if (widget.role == 'admin') {
+        // Group by teacher, then merge their multiple class attendances into one column per teacher
+        final Map<String, List<Map<String, dynamic>>> byTeacher = {};
+        for (final att in attendances) {
+          final data = att['data'] as Map<String, dynamic>;
+          final teacherId = (data['teacher_id'] as String?) ?? 'unknown';
+          byTeacher.putIfAbsent(teacherId, () => []).add(att);
+        }
+        final teacherIds = byTeacher.keys.toList()..sort((a, b) => (_teacherNames[a] ?? '').compareTo(_teacherNames[b] ?? ''));
+        for (final teacherId in teacherIds) {
+          final group = byTeacher[teacherId]!;
+          final mergedAttendance = <String, String>{};
+          for (final att in group) {
+            final data = att['data'] as Map<String, dynamic>;
+            final aMap = Map<String, String>.from(data['attendance'] ?? {});
+            for (final entry in aMap.entries) {
+              // Prefer first non-empty; students should not overlap across classes typically
+              mergedAttendance.putIfAbsent(entry.key, () => entry.value);
             }
-            return '';
-          })();
-          timetableColumns.add(_TimetableColumn(date: date, teacherName: teacherName, attendance: att, type: type));
+          }
+          final teacherName = _teacherNames[teacherId] ?? 'Unknown';
+          final synthetic = {
+            'data': {
+              'attendance': mergedAttendance,
+            }
+          };
+          timetableColumns.add(
+            _TimetableColumn(date: date, teacherName: teacherName, attendance: synthetic, type: null),
+          );
         }
       } else {
-        // Single teacher or not admin: one column per date
-        final att = attendances.first;
-        final teacherId = (att['data'] as Map<String, dynamic>)['teacher_id'] as String?;
-        final teacherName = teacherId != null ? _teacherNames[teacherId] ?? 'Unknown' : 'Unknown';
-        final type = (() {
-          final scheduleId = (att['data'] as Map<String, dynamic>)['schedule_id'] as String?;
-          if (scheduleId != null) {
-            final scheduleType = dateTypeMap[date] ?? '';
-            return scheduleType;
+        // Teacher: merge all attendances for the date into a single column
+        final mergedAttendance = <String, String>{};
+        String? teacherId;
+        for (final att in attendances) {
+          final data = att['data'] as Map<String, dynamic>;
+          teacherId ??= data['teacher_id'] as String?;
+          final aMap = Map<String, String>.from(data['attendance'] ?? {});
+          for (final entry in aMap.entries) {
+            mergedAttendance.putIfAbsent(entry.key, () => entry.value);
           }
-          return '';
-        })();
-        timetableColumns.add(_TimetableColumn(date: date, teacherName: teacherName, attendance: att, type: type));
+        }
+        final teacherName = teacherId != null ? (_teacherNames[teacherId] ?? 'Unknown') : 'Unknown';
+        final synthetic = {
+          'data': {
+            'attendance': mergedAttendance,
+          }
+        };
+        timetableColumns.add(
+          _TimetableColumn(date: date, teacherName: teacherName, attendance: synthetic, type: null),
+        );
       }
     }
     // --- Build students list as before ---
@@ -971,6 +989,143 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       }
     }
     // --- Build DataTable ---
+    // Sort students alphabetically by name (case-insensitive), empty names last
+    final sortedStudents = students.entries.toList()
+      ..sort((a, b) {
+        final an = a.value.trim().toLowerCase();
+        final bn = b.value.trim().toLowerCase();
+        if (an.isEmpty && bn.isEmpty) return 0;
+        if (an.isEmpty) return 1;
+        if (bn.isEmpty) return -1;
+        return an.compareTo(bn);
+      });
+
+    // Group students by class
+    final Map<String, String> studentToClassId = {};
+    final Set<String> classIdsUsed = {};
+    for (var attendance in monthData) {
+      final data = attendance['data'] as Map<String, dynamic>;
+      final clsId = data['class_id'] as String?;
+      if (clsId == null) continue;
+      if (_selectedClassId != null && clsId != _selectedClassId) continue;
+      final ids = List<String>.from(data['student_ids'] ?? []);
+      for (final sid in ids) {
+        studentToClassId.putIfAbsent(sid, () => clsId);
+      }
+      classIdsUsed.add(clsId);
+    }
+
+    // Resolve class display names
+    final Map<String, String> classDisplayNameById = {};
+    for (final clsId in classIdsUsed) {
+      try {
+        final classDoc = await FirebaseFirestore.instance.collection('classes').doc(clsId).get();
+        if (classDoc.exists) {
+          final data = classDoc.data() as Map<String, dynamic>;
+          final grade = (data['grade'] ?? '').toString().trim();
+          final cname = (data['class_name'] ?? '').toString().trim();
+          final disp = '$grade$cname'.trim();
+          classDisplayNameById[clsId] = disp.isEmpty ? clsId : disp;
+        } else {
+          classDisplayNameById[clsId] = clsId;
+        }
+      } catch (_) {
+        classDisplayNameById[clsId] = clsId;
+      }
+    }
+
+    final Map<String, List<MapEntry<String, String>>> classToStudents = {};
+    for (final entry in sortedStudents) {
+      final clsId = studentToClassId[entry.key] ?? 'unknown';
+      classToStudents.putIfAbsent(clsId, () => []).add(entry);
+    }
+
+    final classOrder = classToStudents.keys.toList()
+      ..sort((a, b) {
+        final ad = classDisplayNameById[a] ?? (a == 'unknown' ? 'Lainnya' : a);
+        final bd = classDisplayNameById[b] ?? (b == 'unknown' ? 'Lainnya' : b);
+        return ad.compareTo(bd);
+      });
+
+    // Build rows with class headers
+    final List<DataRow> tableRows = [];
+    for (final clsId in classOrder) {
+      final classLabel = classDisplayNameById[clsId] ?? (clsId == 'unknown' ? 'Lainnya' : clsId);
+      final headerCells = <DataCell>[DataCell(Text('Kelas: $classLabel', style: const TextStyle(fontWeight: FontWeight.bold)))];
+      // Fill remaining cells to match columns count
+      final fillerCount = timetableColumns.length + 4; // date columns + totals (S,I,A,H)
+      for (int i = 0; i < fillerCount; i++) {
+        headerCells.add(const DataCell(SizedBox.shrink()));
+      }
+      tableRows.add(DataRow(cells: headerCells));
+
+      for (final studentEntry in classToStudents[clsId]!) {
+        final studentId = studentEntry.key;
+        final studentName = studentEntry.value;
+        int sakitCount = 0, izinCount = 0, alfaCount = 0, hadirCount = 0;
+        final cells = <DataCell>[
+          DataCell(Text(studentName, style: const TextStyle(fontWeight: FontWeight.w500))),
+        ];
+        for (final col in timetableColumns) {
+          final attendance = col.attendance;
+          String status = '';
+          Color statusColor = Colors.transparent;
+          if (attendance != null) {
+            final attendanceMap = Map<String, String>.from((attendance['data'] as Map<String, dynamic>)['attendance'] ?? {});
+            status = attendanceMap[studentId] ?? '';
+            switch (status) {
+              case 'hadir':
+                statusColor = Colors.green.shade100;
+                hadirCount++;
+                break;
+              case 'sakit':
+                statusColor = Colors.orange.shade100;
+                sakitCount++;
+                break;
+              case 'izin':
+                statusColor = Colors.blue.shade100;
+                izinCount++;
+                break;
+              case 'alfa':
+                statusColor = Colors.red.shade100;
+                alfaCount++;
+                break;
+            }
+          }
+          cells.add(
+            DataCell(
+              Center(
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _getStatusInitial(status),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: _getStatusColor(status),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+        // Totals S, I, A, H
+        cells.add(DataCell(Center(child: Text(sakitCount.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange), textAlign: TextAlign.center))));
+        cells.add(DataCell(Center(child: Text(izinCount.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue), textAlign: TextAlign.center))));
+        cells.add(DataCell(Center(child: Text(alfaCount.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red), textAlign: TextAlign.center))));
+        cells.add(DataCell(Center(child: Text(hadirCount.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green), textAlign: TextAlign.center))));
+
+        tableRows.add(DataRow(cells: cells));
+      }
+    }
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
@@ -1067,117 +1222,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
               ),
             ),
           ],
-          rows: students.entries.map((studentEntry) {
-            final studentId = studentEntry.key;
-            final studentName = studentEntry.value;
-            int sakitCount = 0, izinCount = 0, alfaCount = 0, hadirCount = 0;
-            return DataRow(
-              cells: [
-                DataCell(
-                  Text(
-                    studentName,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                ),
-                ...timetableColumns.map((col) {
-                  final attendance = col.attendance;
-                  String status = '';
-                  Color statusColor = Colors.transparent;
-                  if (attendance != null) {
-                    final attendanceMap = Map<String, String>.from((attendance['data'] as Map<String, dynamic>)['attendance'] ?? {});
-                    status = attendanceMap[studentId] ?? '';
-                    switch (status) {
-                      case 'hadir':
-                        statusColor = Colors.green.shade100;
-                        hadirCount++;
-                        break;
-                      case 'sakit':
-                        statusColor = Colors.orange.shade100;
-                        sakitCount++;
-                        break;
-                      case 'izin':
-                        statusColor = Colors.blue.shade100;
-                        izinCount++;
-                        break;
-                      case 'alfa':
-                        statusColor = Colors.red.shade100;
-                        alfaCount++;
-                        break;
-                    }
-                  }
-                  return DataCell(
-                    Center(
-                      child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: statusColor,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          _getStatusInitial(status),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: _getStatusColor(status),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-                DataCell(
-                  Center(
-                    child: Text(
-                    sakitCount.toString(),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.orange,
-                    ),
-                    textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-                DataCell(
-                  Center(
-                    child: Text(
-                    izinCount.toString(),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue,
-                    ),
-                    textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-                DataCell(
-                  Center(
-                    child: Text(
-                    alfaCount.toString(),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.red,
-                    ),
-                    textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-                DataCell(
-                  Center(
-                    child: Text(
-                    hadirCount.toString(),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
-                    textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }).toList(),
+          rows: tableRows,
         ),
       ),
     );
